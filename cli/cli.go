@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"dfs/master"
 	"dfs/protocol"
 	"fmt"
 	"os"
@@ -27,6 +28,11 @@ func StartCli() {
 		case "start":
 			fmt.Println("starting server ")
 			protocol.StartServer()
+
+		case "start master":
+			fmt.Println("starting master server ")
+			master.StartMaster()
+
 		case "help":
 			fmt.Println("Available commands:")
 			fmt.Println("  hello - Get a greeting")

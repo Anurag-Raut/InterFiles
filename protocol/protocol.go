@@ -2,12 +2,17 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"time"
 )
+
+var MASTER_SERVER_URL = "http://127.0.0.1:8000" 
+
 var CHUNK_SIZE=1024 * 1024
 
 func StartServer() {
@@ -60,28 +65,38 @@ func addClient(listener net.Listener) {
 	port := addr.Port
 	directory := "/home/anurag/projects/dfs/dump"
 	fmt.Printf("Server is listening on %s:%d\n", ip, addr.Port)
-	file, err := os.OpenFile("/home/anurag/projects/dfs/clients.txt", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-
-	if err != nil {
-		if os.IsExist(err) {
-			fmt.Println("File already exists..")
-		} else {
-
-			fmt.Println("Error opening file:", err)
-			return
-		}
-	}
+	
 	fmt.Println("writing")
 	content:=fmt.Sprintf("%s:%d:%s \n", ip, port, directory)
-	fmt.Println("WRITING ",content)
-	_,err=file.WriteString(content)
-	if err!= nil {
-		fmt.Println("ERROR while writin to client.txt",err.Error())
+	req, err := http.NewRequest("POST", MASTER_SERVER_URL+"/addClient", bytes.NewBufferString(content))
 
-
+	if err != nil {
+		fmt.Println("ERROR WHILE SENDING A REQUEST",err.Error())
+		return
+	}	
+	req.Header.Set("Content-Type", "application/text")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending request:", err)
+		return
 	}
 
-	defer file.Close()
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		fmt.Println("client added succesfully")
+	} else {
+		fmt.Printf("Failed to send data, status code: %d\n", resp.StatusCode)
+	}
+
+
+
+
+
+
+	
+
 
 }
 
@@ -154,6 +169,10 @@ func UploadFile(filename string){
 	}
 	
 
+	//make tracker file
+
+	
+
 	buf:=make([]byte,CHUNK_SIZE)
 	for{
 		bytesRead, err := file.Read(buf)
@@ -165,6 +184,8 @@ func UploadFile(filename string){
 
 		if bytesRead<CHUNK_SIZE{
 			//eof
+
+			break
 
 		}
 

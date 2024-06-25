@@ -1,3 +1,2 @@
-127.0.0.1:8080:/home/anurag/projects/dfs/dump 
 127.0.0.1:8082:/home/anurag/projects/dfs/dump 
-127.0.0.1:8081:/home/anurag/projects/dfs/dump 
+127.0.0.1:8083:/home/anurag/projects/dfs/dump 
