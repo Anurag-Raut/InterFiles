@@ -2,10 +2,13 @@ package master
 
 import (
 	"bufio"
+	"dfs/global"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 var CLIENT_FILE_PATH="/home/anurag/projects/dfs/clients.txt"
@@ -45,12 +48,65 @@ func addClient(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func getClients(w http.ResponseWriter, r *http.Request) {
+	file, err := os.OpenFile(CLIENT_FILE_PATH, os.O_RDONLY,0)
+
+	if err != nil {
+		fmt.Println("ERROR",err.Error())
+		return
+	}
+	scanner := bufio.NewScanner(file)
+	
+
+	var clients []global.Client
+	for i := 0; i < 3 && scanner.Scan(); i++ {
+		line := scanner.Text()
+		args:=strings.Split(line,":")
+		if err != nil {
+			fmt.Printf("Invalid port number: %s\n", args[2])
+			continue
+		}
+
+		newClinet:=global.Client{
+			ClientId: args[0],
+			Ip: args[1],
+			Port: args[2],
+
+		}
+
+		fmt.Println("client id :",newClinet.ClientId,"clientIP :",newClinet.Ip,"client port :",newClinet.Port)
+
+		clients = append(clients, newClinet)
+	}
+
+	jsonData, err := json.Marshal(clients)
+	if err != nil {
+		http.Error(w, "Error marshaling JSON: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
+
+
+	
+
+	
+
+
+
+	
+
+	
+
+}	
+
 
 
 func StartMaster() {
 
 	http.HandleFunc("/", getRoot)
 	http.HandleFunc("/addClient", addClient)
+	http.HandleFunc("/getClients",getClients)
 
 	err := http.ListenAndServe(":8000", nil)
 

@@ -2,8 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"dfs/client"
 	"dfs/master"
-	"dfs/protocol"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -25,9 +26,12 @@ func StartCli() {
 		switch input {
 		case "hello":
 			fmt.Println("Hello there!")
-		case "start":
+		case "start client":
 			fmt.Println("starting server ")
-			protocol.StartServer()
+			clientObj := client.InitalizeClient()
+			StartClientCli(clientObj)
+
+		case "send file":
 
 		case "start master":
 			fmt.Println("starting master server ")
@@ -45,3 +49,77 @@ func StartCli() {
 	}
 
 }
+
+func StartClientCli(c client.ClientService) {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+
+		fmt.Print("CLIENT > ")
+
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		args := strings.Fields(input)
+
+		command := args[0]
+
+		if len(command) == 0 {
+			return
+		}
+	
+
+		if command == "exit" {
+			break
+		}
+
+		switch command {
+		case "uploadFile":
+			filepath:=handleFileOperation(command,args[1:])
+			if isValidFilePath(filepath){
+				c.UploadFile(filepath)
+					
+			} else{
+				fmt.Println("invalid path")
+			}
+
+		}
+
+	}
+
+}
+
+func handleFileOperation(operation string, args []string) string {
+	// Define flags
+	flagSet := flag.NewFlagSet(operation, flag.ContinueOnError)
+	filePath := flagSet.String("f", "", "File path for "+operation)
+
+	err := flagSet.Parse(args)
+	if err != nil {
+		fmt.Println("Error parsing flags:", err)
+		return ""
+	}
+
+	if *filePath == "" {
+		fmt.Println("Please specify a file path using the -f flag")
+		return ""
+	}
+
+	return *filePath
+}
+
+
+func isValidFilePath(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("Error: File does not exist.")
+		} else if os.IsPermission(err) {
+			fmt.Println("Error: Permission denied to access the file.")
+		} else {
+			fmt.Println("Error:", err)
+		}
+		return false
+	}
+	return true
+}
+
+

@@ -2,103 +2,18 @@ package protocol
 
 import (
 	"bufio"
-	"bytes"
+	"dfs/global"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"path/filepath"
+	// "time"
+
 	"os"
-	"time"
 )
-
-var MASTER_SERVER_URL = "http://127.0.0.1:8000" 
-
-var CHUNK_SIZE=1024 * 1024
-
-func StartServer() {
-	fmt.Println("starting server on port 8080")
-	var listener net.Listener
-
-	basePort := 8080
-	maxRetries := 12
-
-	var err error
-
-	for i := 0; i < maxRetries; i++ {
-		port := basePort + i
-		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
-		if err == nil {
-			// Successfully bound to a port
-			fmt.Printf("Server is listening on port %d\n", port)
-			break
-		}
-		fmt.Printf("Failed to bind to port %d: %s. Trying next port...\n", port, err)
-		time.Sleep(time.Second)
-	}
-	if err != nil {
-		fmt.Println("Error staring server", err.Error())
-		return
-	}
-
-	addClient(listener)
-
-	defer listener.Close()
-
-	for {
-		conn, err := listener.Accept()
-
-		if err != nil {
-			fmt.Println("Error accepting connections", err.Error())
-
-			return
-		}
-
-		go handleConnection(conn)
-
-	}
-
-}
-
-func addClient(listener net.Listener) {
-	addr := listener.Addr().(*net.TCPAddr)
-	ip := "127.0.0.1"
-	port := addr.Port
-	directory := "/home/anurag/projects/dfs/dump"
-	fmt.Printf("Server is listening on %s:%d\n", ip, addr.Port)
-	
-	fmt.Println("writing")
-	content:=fmt.Sprintf("%s:%d:%s \n", ip, port, directory)
-	req, err := http.NewRequest("POST", MASTER_SERVER_URL+"/addClient", bytes.NewBufferString(content))
-
-	if err != nil {
-		fmt.Println("ERROR WHILE SENDING A REQUEST",err.Error())
-		return
-	}	
-	req.Header.Set("Content-Type", "application/text")
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error sending request:", err)
-		return
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		fmt.Println("client added succesfully")
-	} else {
-		fmt.Printf("Failed to send data, status code: %d\n", resp.StatusCode)
-	}
-
-
-
-
-
-
-	
-
-
-}
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
@@ -157,42 +72,108 @@ func SendMessage(message string) {
 	fmt.Println("Message sent successfully")
 }
 
-func UploadFile(filename string){
+func UploadFile(file *os.File, clientId string) {
 
-	//check file exists
-	file,err:= os.OpenFile(filename,os.O_RDONLY,0)
-	if err!=nil {
-		fmt.Println("Error opening file . Please try again")
-
+	clients, err := getClients()
+	if err != nil {
+		fmt.Println("ERROR", err.Error())
 		return
+	}
+
+	for _, client := range clients {
+		if client.ClientId == clientId {
+			continue
+		}
+		conn, err := net.Dial("tcp", client.Ip+":"+client.Port)
+		if err != nil {
+			fmt.Println("ADSDAS", err.Error())
+			continue
+		}
+		go uploadToClient(file, conn)
 
 	}
-	
 
-	//make tracker file
+}
 
-	
 
-	buf:=make([]byte,CHUNK_SIZE)
-	for{
+
+func uploadToClient( file *os.File, conn net.Conn) {
+	file.Seek(0, 0)
+	totlBytes := 0
+	var chunkNo = 0
+	filename := filepath.Base(file.Name())
+	lenOfFilename := uint16(len(filename))
+	for {
+
+		buf := make([]byte, global.CHUNK_SIZE-global.HEADER_LEN-int(lenOfFilename))
+
 		bytesRead, err := file.Read(buf)
+		totlBytes += bytesRead
+		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
+		if err != nil {
 
-		if err!=nil {
-			fmt.Println("ERROR OCCURED WHILE READING BYTES")
+			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
+			if err == io.EOF {
+
+			} else {
+				fmt.Println("WE FUCKING RETURNING BOYS")
+				return
+			}
+		}
+
+		if err != nil {
+			fmt.Println("ERROR SENDING FILR DIA:", err.Error())
 			return
 		}
 
-		if bytesRead<CHUNK_SIZE{
+		lenOfChunk := uint64(bytesRead)
+
+		message := make([]byte, global.CHUNK_SIZE)
+
+		binary.LittleEndian.PutUint16(message, lenOfFilename)
+
+		binary.LittleEndian.PutUint64(message[2:], lenOfChunk)
+		copy(message[2+8:], []byte(filename))
+		copy(message[2+8+lenOfFilename:], buf)
+
+		fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", len(message))
+		chunkNo++
+		conn.Write(message)
+
+		ackBuf := make([]byte, 1)
+		conn.Read(ackBuf)
+
+		if bytesRead < len(buf) {
 			//eof
+
+			fmt.Println("totlBytes", totlBytes)
 
 			break
 
 		}
 
-
 	}
 
+	defer conn.Close()
 
-	
+}
+
+func getClients() ([]global.Client, error) {
+
+	resp, err := http.Get(global.MASTER_SERVER_URL + "/getClients")
+
+	if err != nil {
+		fmt.Println("ERROR", err.Error())
+		return nil, err
+	}
+
+	var clients []global.Client
+
+	err = json.NewDecoder(resp.Body).Decode(&clients)
+	if err != nil {
+		fmt.Println("ERROR", err.Error())
+		return nil, err
+	}
+	return clients, nil
 
 }
