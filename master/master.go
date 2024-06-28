@@ -3,117 +3,192 @@ package master
 import (
 	"bufio"
 	"dfs/global"
-	"encoding/json"
+	"dfs/protocol"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"os"
 	"strings"
+	"time"
+
+	"github.com/nrednav/cuid2"
 )
 
-var CLIENT_FILE_PATH="/home/anurag/projects/dfs/clients.txt"
+type MasterService interface {
+	Start()
+	startAcceptingConn()
+	handleConnection(conn net.Conn)
+	addClient(reader *bufio.Reader)
+	announceFile(reader *bufio.Reader)
+
+
+}
+
+
+
+type Master struct {
+	ID       string
+	IP       string
+	Port     int
+	listener net.Listener
+	clientStore map[string]global.Client
+    fileStore   map[string]global.File
+}
+
+var CLIENT_FILE_PATH = "/home/anurag/projects/dfs/clients.txt"
+
+
 
 func getRoot(w http.ResponseWriter, r *http.Request) {
 	writer := bufio.NewWriter(w)
 	writer.WriteString("hello")
 	writer.Flush()
 
-
 }
 
-func addClient(w http.ResponseWriter, r *http.Request) {
-	
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
+func (master *Master) Start() {
+
+	basePort := 8000
+	maxRetries := 12
+	var listener net.Listener
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		port := basePort + i
+		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			// Successfully bound to a port
+			fmt.Printf("Master Server is listening on port %d\n", port)
+			break
 		}
-		clientData := string(body)
-		fmt.Println(clientData,"client data")
-		file, err := os.OpenFile(CLIENT_FILE_PATH, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-
-		if err != nil {
-			if os.IsExist(err) {
-				fmt.Println("File already exists..")
-			} else {
-	
-				fmt.Println("Error opening file:", err)
-				return
-			}
-		}
-
-		file.WriteString(clientData)
-
-		defer file.Close()
-
-}
-
-func getClients(w http.ResponseWriter, r *http.Request) {
-	file, err := os.OpenFile(CLIENT_FILE_PATH, os.O_RDONLY,0)
-
+		fmt.Printf("Failed to bind to port %d: %s. Trying next port...\n", port, err)
+		time.Sleep(time.Second)
+	}
 	if err != nil {
-		fmt.Println("ERROR",err.Error())
+		fmt.Println("Error staring server", err.Error())
 		return
 	}
-	scanner := bufio.NewScanner(file)
-	
 
-	var clients []global.Client
-	for i := 0; i < 3 && scanner.Scan(); i++ {
-		line := scanner.Text()
-		args:=strings.Split(line,":")
+	addr := listener.Addr().(*net.TCPAddr)
+
+	master.listener = listener
+	master.Port = addr.Port
+	master.IP = "127.0.0.1"
+	master.ID = cuid2.Generate()
+	master.clientStore= make(map[string]global.Client)
+	master.fileStore= make(map[string]global.File)
+
+	go master.startAcceptingConn()
+
+}
+
+func (master *Master) startAcceptingConn() {
+	for {
+		conn, err := master.listener.Accept()
 		if err != nil {
-			fmt.Printf("Invalid port number: %s\n", args[2])
+			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-
-		newClinet:=global.Client{
-			ClientId: args[0],
-			Ip: args[1],
-			Port: args[2],
-
-		}
-
-		fmt.Println("client id :",newClinet.ClientId,"clientIP :",newClinet.Ip,"client port :",newClinet.Port)
-
-		clients = append(clients, newClinet)
+		go master.handleConnection(conn)
 	}
+}
 
-	jsonData, err := json.Marshal(clients)
+func (master *Master) handleConnection(conn net.Conn) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	var requestType uint8
+	err := binary.Read(reader, binary.LittleEndian, &requestType)
+	fmt.Println(requestType,"REQ_TYPE")
 	if err != nil {
-		http.Error(w, "Error marshaling JSON: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
-
-
-	
-
-	
-
-
-
-	
-
-	
-
-}	
-
-
-
-func StartMaster() {
-
-	http.HandleFunc("/", getRoot)
-	http.HandleFunc("/addClient", addClient)
-	http.HandleFunc("/getClients",getClients)
-
-	err := http.ListenAndServe(":8000", nil)
-
-	if err != nil {
-		fmt.Println("AN error occured")
+		// Handle error
+		fmt.Println("Error reading request type:", err)
 		return
 	}
 
+	// reader.Read(requestType)
+
+	switch requestType {
+	case global.ADD_CLIENT:
+		master.addClient(reader)
+
+	case global.ANNOUNCE:
+		fmt.Println("BROTHER WE GOOD")
+		master.announceFile(reader)
+
+
+	}
 
 }
+
+func (master *Master) addClient(reader *bufio.Reader) {
+	fmt.Println("LESS FUCKING GOOOO")
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		fmt.Println("error reading body in addClient")
+		return
+	}
+	clientData := string(body)
+	fmt.Println(clientData, "client data")
+
+	args := strings.Split(clientData, ":")
+
+	newClient := global.Client{
+		ClientId:  args[0],
+		Ip:        args[1],
+		Port:      args[2],
+		Directory: args[3],
+	}
+
+	master.clientStore[newClient.ClientId] = newClient
+
+	// fmt.Println(newClient,master.clientStore[newClient.ClientId],"CLIENTT")
+
+}
+
+func (master *Master) announceFile(reader *bufio.Reader) {
+	fmt.Println("YOOOO")
+	//finding relevant clients
+	body, err := io.ReadAll(reader)
+
+	if err != nil {
+		fmt.Println("error reading body in addClient")
+		return
+	}
+	//adding to file store
+	fmt.Println(string(body),"LESS GOOO")
+	args := strings.Split(string(body), ":")
+	senderClientId := args[0]
+	fileId := args[1]
+	filename := args[2]
+	file := global.File{
+		Filename: filename,
+		ID:       fileId,
+		Clients:  []global.Client{master.clientStore[senderClientId]},
+	}
+
+	fmt.Println("NEW FILE",file.Clients)
+
+	for receiverClientId, _ := range master.clientStore {
+		if receiverClientId == senderClientId {
+			continue
+		}
+		protocol.RequestFile(master.clientStore[receiverClientId], file)
+
+	}
+
+}
+
+func InitalizeMaster() MasterService {
+	var master MasterService = &Master{
+
+	}
+
+	master.Start()
+
+	return master
+}
+
+//todo
+// announcement polling
+//30 mins distribute

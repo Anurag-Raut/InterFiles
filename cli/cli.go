@@ -13,7 +13,11 @@ import (
 func StartCli() {
 
 	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	args := strings.Fields(input)
 
+	command := args[0]
 	for {
 		fmt.Print("> ")
 
@@ -23,19 +27,22 @@ func StartCli() {
 		if input == "exit" {
 			break
 		}
-		switch input {
+		switch command {
 		case "hello":
 			fmt.Println("Hello there!")
-		case "start client":
+		case "startClient":
 			fmt.Println("starting server ")
-			clientObj := client.InitalizeClient()
+			directory :=handleDirectoryOperation(command,args[1:])
+			clientObj := client.InitalizeClient(directory)
 			StartClientCli(clientObj)
 
-		case "send file":
+		case "sendFile":
 
-		case "start master":
+		case "startMaster":
 			fmt.Println("starting master server ")
-			master.StartMaster()
+			master:=master.InitalizeMaster()
+			fmt.Println(master)
+
 
 		case "help":
 			fmt.Println("Available commands:")
@@ -104,6 +111,22 @@ func handleFileOperation(operation string, args []string) string {
 	}
 
 	return *filePath
+}
+
+func handleDirectoryOperation(operation string, args []string) string {
+	// Define flags
+	flagSet := flag.NewFlagSet(operation, flag.ContinueOnError)
+	directoryPath := flagSet.String("d", "", "File path for "+operation)
+
+	err := flagSet.Parse(args)
+	if err != nil {
+		fmt.Println("Error parsing flags:", err)
+		return ""
+	}
+
+	
+
+	return *directoryPath
 }
 
 

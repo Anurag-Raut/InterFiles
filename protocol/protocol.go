@@ -4,12 +4,11 @@ import (
 	"bufio"
 	"dfs/global"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"path/filepath"
+
 	// "time"
 
 	"os"
@@ -72,32 +71,27 @@ func SendMessage(message string) {
 	fmt.Println("Message sent successfully")
 }
 
-func UploadFile(file *os.File, clientId string) {
+func AnnounceFile(fileId,filename, clientId string) {
 
-	clients, err := getClients()
+	conn,err:=net.Dial("tcp",global.MASTER_SERVER_URL)
 	if err != nil {
-		fmt.Println("ERROR", err.Error())
+		fmt.Println("Failed to connect to the server:", err)
 		return
 	}
+	binary.Write(conn,binary.BigEndian,global.ANNOUNCE)
+	file_body:=clientId+":"+fileId+":"+filename
+	conn.Write([]byte(file_body))
+	conn.Close()
 
-	for _, client := range clients {
-		if client.ClientId == clientId {
-			continue
-		}
-		conn, err := net.Dial("tcp", client.Ip+":"+client.Port)
-		if err != nil {
-			fmt.Println("ADSDAS", err.Error())
-			continue
-		}
-		go uploadToClient(file, conn)
 
-	}
+
+	
 
 }
 
 
 
-func uploadToClient( file *os.File, conn net.Conn) {
+func UploadToClient( file *os.File, conn net.Conn) {
 	file.Seek(0, 0)
 	totlBytes := 0
 	var chunkNo = 0
@@ -158,22 +152,106 @@ func uploadToClient( file *os.File, conn net.Conn) {
 
 }
 
-func getClients() ([]global.Client, error) {
-
-	resp, err := http.Get(global.MASTER_SERVER_URL + "/getClients")
-
+func HandShake(receiver , sender global.Client) error {
+	//sender handshake
+	conn,err :=net.Dial("tcp",sender.GetUrl())
+	if err !=nil {
+		fmt.Println("Error occured ",err.Error())
+		return err
+	}
+	conn.Write([]byte{byte(global.SENDER_HANDSHAKE)})
+	var status int8
+	err = binary.Read(conn, binary.BigEndian, &status)
 	if err != nil {
-		fmt.Println("ERROR", err.Error())
-		return nil, err
+		fmt.Printf("Error reading status: %v", err)
+		return nil
 	}
 
-	var clients []global.Client
-
-	err = json.NewDecoder(resp.Body).Decode(&clients)
-	if err != nil {
-		fmt.Println("ERROR", err.Error())
-		return nil, err
+	if status==0{
+		return fmt.Errorf("sender handshake failed")
 	}
-	return clients, nil
+
+	conn.Close()
+
+	conn,err= net.Dial("tcp",receiver.GetUrl())
+	if err !=nil {
+		fmt.Println("Error occured ",err.Error())
+		return err
+	}
+
+	conn.Write([]byte{byte(global.CLIENT_HANDSHAKE)})
+
+	
+	err = binary.Read(conn, binary.BigEndian, &status)
+	if err != nil {
+		fmt.Printf("Error reading status: %v", err)
+		return nil
+	}
+
+	if status==0{
+		return fmt.Errorf("receiver handshake failed")
+	}
+
+	conn.Close()
+
+
+
+
+
+
+	return nil
+	
 
 }
+
+// func DownloadFile(file global.File,sender global.Client){
+// 	// receiver <- sender
+// 	// make connection to sneder and ask for file
+
+// 	conn,err:=net.Dial("tcp",sender.GetUrl())
+
+// 	binary.Write(conn,binary.LittleEndian,global.SENDER_PULLFILE)
+
+	
+
+
+
+
+
+
+// }
+
+func RequestFile(receiver global.Client,file global.File){
+	fmt.Println("REQUESTING FIlE")
+	for _,sender:=range file.Clients {
+		fmt.Println("THIS DUDE IS POTENTIAL sender")
+		// protocol.HandShake(receiver,sender)
+		
+		conn,err:=net.Dial("tcp",receiver.GetUrl())
+		if err !=nil {
+			fmt.Println("ERROR"  ,err.Error())
+			return
+
+		}
+
+		binary.Write(conn,binary.BigEndian,global.REQUEST_FILE)
+		fmt.Println(sender.GetUrl()+":"+file.ID,sender.Ip,"YOO asd")
+		conn.Write([]byte(sender.GetUrl()+":"+file.ID))
+
+
+		conn.Close()
+		
+
+		
+
+
+		
+
+
+	}
+
+}
+
+
+
+

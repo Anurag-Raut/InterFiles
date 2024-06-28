@@ -2,16 +2,16 @@ package client
 
 import (
 	"bufio"
-	"bytes"
 	"dfs/global"
 	"dfs/protocol"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 
 	// "io"
 	"net"
-	"net/http"
 	"os"
 	"time"
 
@@ -24,24 +24,30 @@ type ClientService interface {
 	UploadFile(filepath string)
 	startAcceptingConn()
 	handleConnection(conn net.Conn)
-	handleFileChunk(filename string ,chunk []byte)
+	handleFileChunk(filename string, chunk []byte)
+	startReqFileLoop()
 }
 
 type Client struct {
-	ID        string
-	IP        string
-	Port      int
-	listener  net.Listener
-	Directory string
+	ID          string
+	IP          string
+	Port        int
+	listener    net.Listener
+	Directory   string
+	ReqFileChan chan string
 }
+
+const (
+	GET_FILE = iota
+)
 
 func (client *Client) Start() {
 	basePort := 8080
 	maxRetries := 12
 	var listener net.Listener
 	var err error
-
-	for i := 0; i < maxRetries; i++ {
+	var i int = 0
+	for i = 0; i < maxRetries; i++ {
 		port := basePort + i
 		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
@@ -63,9 +69,19 @@ func (client *Client) Start() {
 	client.Port = addr.Port
 	client.IP = "127.0.0.1"
 	client.ID = cuid2.Generate()
-	client.Directory = "/home/anurag/projects/dfs/dum/"
 	client.AddToServer()
+	client.ReqFileChan = make(chan string)
+	if client.Directory == "" {
+		client.Directory = "/home/anurag/projects/dfs/client" + fmt.Sprintf("%d", i) + "/"
+	}
 
+	err = os.MkdirAll(client.Directory, 0755)
+	if err != nil {
+		fmt.Printf("Error creating directory: %v\n", err)
+		return
+	}
+
+	go client.startReqFileLoop()
 	go client.startAcceptingConn()
 
 }
@@ -80,12 +96,56 @@ func (client *Client) startAcceptingConn() {
 	}
 }
 
+func (client *Client) startReqFileLoop() {
+	fmt.Println("STARTING REQ LOOP")
+	for msg := range client.ReqFileChan {
+
+		args := strings.Split(string(msg), ":")
+		senderIP := args[0]
+		senderPort := args[1]
+		fileId := args[2]
+		fmt.Println("WANT TO GET THIS FILE", fileId)
+
+		senderConn, err := net.Dial("tcp", senderIP+":"+senderPort)
+		if err != nil {
+			fmt.Println("REQ FILE ERROR", err.Error())
+			return
+		}
+		binary.Write(senderConn, binary.BigEndian, global.PULL_FILE)
+		binary.Write(senderConn, binary.BigEndian, uint16(len(fileId)))
+		senderConn.Write([]byte(fileId))
+		// senderConn.Write([]byte{'\x00'})
+
+		reader := bufio.NewReader(senderConn)
+
+		client.getFile(reader, senderConn)
+
+	}
+}
+
 func (client *Client) handleConnection(conn net.Conn) {
-	defer conn.Close()
+
+	var requestType uint8
 	reader := bufio.NewReader(conn)
+
+	binary.Read(reader, binary.LittleEndian, &requestType)
+	fmt.Println(requestType, "REQ_t")
+	switch requestType {
+	case GET_FILE:
+		client.getFile(reader, conn)
+	case global.PULL_FILE:
+		client.pullFile(reader, conn)
+	case global.REQUEST_FILE:
+		client.RequestFile(reader, conn)
+
+	}
+
+}
+
+func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
+
 	totalLen := 0
-	fmt.Println("BROTHER CHILLLLL ",conn.RemoteAddr().Network())
-	var chunkNo=0
+	var chunkNo = 0
 	for {
 		chunk := make([]byte, global.CHUNK_SIZE)
 		n, err := reader.Read(chunk)
@@ -101,100 +161,156 @@ func (client *Client) handleConnection(conn net.Conn) {
 				// return
 			}
 		}
-		
-		filenameLen:=int(binary.LittleEndian.Uint16(chunk))
-		fmt.Println("chunkNo",chunkNo,"number of bytes", n,"filenameLen",filenameLen)
+
+		filenameLen := int(binary.LittleEndian.Uint16(chunk))
+		fmt.Println("chunkNo", chunkNo, "number of bytes", n, "filenameLen", filenameLen)
 		chunkNo++
-		filename:=string(chunk[global.HEADER_LEN:global.HEADER_LEN+filenameLen])
-		data:=chunk[2+8+filenameLen:]
-	
-	
+		filename := string(chunk[global.HEADER_LEN : global.HEADER_LEN+filenameLen])
+		data := chunk[2+8+filenameLen:]
+
 		// fmt.Println("RECIVED FILENAME",filename,"CHUNK",chunk)
-	
-		client.handleFileChunk(filename,data)
+
+		client.handleFileChunk(filename, data)
 		totalLen += n
 		ackBuf := []byte{1}
 		conn.Write(ackBuf)
 		if err != nil {
 			fmt.Println("Error reading from connection:", err)
-			fmt.Println("totalLen",totalLen)
+			fmt.Println("totalLen", totalLen)
 			// if err == io.EOF {
 			// 	break // End of the message
 			// }
 			break
 		}
-		
-
 
 	}
 
-	
+}
 
-	
+func (client *Client) pullFile(reader *bufio.Reader, conn net.Conn) {
+	//sender would send to client
+	var fileIdLen uint16
+	err := binary.Read(reader, binary.BigEndian, &fileIdLen)
+	if err != nil {
+		fmt.Println("PULL FILE DAYUM", err.Error())
+		return
+	}
+	fmt.Println(fileIdLen,"LEEENENENENE")
+	var fileId string
+	fileidBuf := make([]byte, fileIdLen)
+
+	// time.Sleep(time.Second * 5)
+	err = binary.Read(reader, binary.BigEndian, fileidBuf)
+	if err != nil {
+		fmt.Println("Binary Read", err.Error())
+		return
+	}
+	fileId=string(fileidBuf)
+	fmt.Println("ZQUU", client.Directory+fileId)
+
+	file, err := os.OpenFile(client.Directory+fileId, os.O_RDONLY, 0)
+	if err != nil {
+		fmt.Println("PULL FILE ERROR", err.Error())
+		return
+	}
+	fmt.Println("SENDING::::")
+	protocol.UploadToClient(file, conn)
+
+	defer file.Close()
 
 }
-func (client *Client) handleFileChunk(filename string,chunk []byte) {
 
-    file, err := os.OpenFile(client.Directory+filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+func (clinet *Client) RequestFile(reader *bufio.Reader, conn net.Conn) {
+	//
+
+	// bro send file
+	body, err := io.ReadAll(reader)
 	if err != nil {
-         fmt.Println("failed to create file", err.Error())
-		 return
-    }
+		fmt.Println("REQ FILE ERROR", err.Error())
+		return
+	}
+	go func() {
+		fmt.Println("BRO : SEND FILE", string(body))
+		clinet.ReqFileChan <- string(body)
+		fmt.Println("TASKEDDE")
+	}()
+
+	conn.Close()
+
+}
+
+func (client *Client) handleFileChunk(filename string, chunk []byte) {
+
+	file, err := os.OpenFile(client.Directory+filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println("failed to create file", err.Error())
+		return
+	}
 	defer file.Close()
-	_,err=file.Write(chunk)
+	_, err = file.Write(chunk)
 	if err != nil {
 		fmt.Println("failed to write chunk to file:", err.Error())
 
 		return
 	}
 
-
-
-
-
 }
 func (client *Client) AddToServer() {
 
-	fmt.Println("writing")
+	fmt.Println("writing", global.MASTER_SERVER_URL)
 	content := fmt.Sprintf("%s:%s:%d:%s \n", client.ID, client.IP, client.Port, client.Directory)
 
-	req, err := http.NewRequest("POST", global.MASTER_SERVER_URL+"/addClient", bytes.NewBufferString(content))
+	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 
 	if err != nil {
 		fmt.Println("ERROR WHILE SENDING A REQUEST", err.Error())
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/text")
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req)
+	binary.Write(conn, binary.BigEndian, global.ADD_CLIENT)
+
+	conn.Write([]byte(content))
+
+	err = conn.Close()
+
 	if err != nil {
-		fmt.Println("Error sending request:", err)
+		fmt.Println("ERROR WHILE CLosing A REQUEST", err.Error())
 		return
 	}
 
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		fmt.Println("client added succesfully")
-	} else {
-		fmt.Printf("Failed to send data, status code: %d\n", resp.StatusCode)
-	}
-
 }
-func (client *Client) UploadFile(filepath string) {
-	file, err := os.OpenFile(filepath, os.O_RDONLY, 0)
-
+func (client *Client) UploadFile(filePath string) {
+	fileId := cuid2.Generate()
+	file, err := os.Open(filePath)
+	ext := strings.ToLower(filepath.Ext(filePath))
+	fileId += ext
 	if err != nil {
 		fmt.Println("ERROR OPENING FILE", err.Error())
 
 	}
+	destPath := client.Directory + fileId
 
-	protocol.UploadFile(file,client.ID)
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		fmt.Println("error creating destination file:", err.Error())
+		return
+	}
+
+	_, err = io.Copy(destFile, file)
+	if err != nil {
+		fmt.Println("error copying file:", err.Error())
+		return
+	}
+	defer destFile.Close()
+	defer file.Close()
+
+	protocol.AnnounceFile(fileId, file.Name(), client.ID)
 }
 
-func InitalizeClient() ClientService {
-	var client ClientService = &Client{}
+func InitalizeClient(directory string) ClientService {
+	var client ClientService = &Client{
+		Directory: directory,
+	}
 
 	client.Start()
 

@@ -1,2 +1,0 @@
-aofytbgjz1i24czqgqp619ia:127.0.0.1:8080:/home/anurag/projects/dfs/dum/ 
-wn2mgm189g2eikfhagx2xl0x:127.0.0.1:8081:/home/anurag/projects/dfs/dum/ 
