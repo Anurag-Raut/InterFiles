@@ -3,22 +3,20 @@ package tracker
 import (
 	"crypto/sha512"
 	"dfs/global"
-	"encoding/binary"
-	"encoding/hex"
+	"dfs/verifier"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
-
-	"github.com/nrednav/cuid2"
 )
 
-func CreateTracker(ogFile os.File, noOfBytes string, clientId string)	 {
-	id := cuid2.Generate()
+func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
+	fmt.Println("HELLO FROM TRACKER CREATER")
+	ogFile.Seek(0, 0)
 	filename := filepath.Base(ogFile.Name())
-	file, err := os.Create(fmt.Sprintf("/home/anurag/projects/dfs/tracker_files/%s_tracker.txt", id))
+	file, err := os.Create(fmt.Sprintf("/home/anurag/projects/dfs/tracker_files/%s_tracker.txt", fileId))
 	if err != nil {
 		fmt.Println("Error creatinf file", err.Error())
 		return
@@ -26,25 +24,28 @@ func CreateTracker(ogFile os.File, noOfBytes string, clientId string)	 {
 
 	date := time.Now().String()
 	fileInfo, err := file.Stat()
-	if err!=nil{
-		fmt.Println("Error getting file size value",err.Error())
+	if err != nil {
+		fmt.Println("Error getting file size value", err.Error())
 		return
 	}
 
-	file.WriteString(id)
-	file.WriteString(fmt.Sprintf("%s:%s:%d:%s", filename, date,fileInfo.Size()	, clientId))
+	file.WriteString(fileId)
+	file.WriteString("\n")
+	file.WriteString(fmt.Sprintf("%s:%s:%d:%s", filename, date, fileInfo.Size(), clientId))
+	file.WriteString("\n")
+
+	fmt.Println("once HELLO FROM TRACKER CREATER")
 
 	//chunks
-	file.Seek(0, 0)
+	
 	totlBytes := 0
 	var chunkNo = 0
-	lenOfFilename := uint16(len(filename))
 	hasher := sha512.New()
 
 	for {
-		buf := make([]byte, global.CHUNK_SIZE-global.HEADER_LEN-int(lenOfFilename))
+		buf := make([]byte, global.CHUNK_SIZE)
 
-		bytesRead, err := file.Read(buf)
+		bytesRead, err := ogFile.Read(buf)
 		totlBytes += bytesRead
 		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
 		if err != nil {
@@ -52,38 +53,43 @@ func CreateTracker(ogFile os.File, noOfBytes string, clientId string)	 {
 			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
 			if err != io.EOF {
 
-				fmt.Println("WE FUCKING RETURNING BOYS")
-				return
+				fmt.Println("WE FUCKING TRACKER BOYS", err.Error())
+				break
 			}
 		}
 
 		if err != nil {
-			fmt.Println("ERROR SENDING FILR DIA:", err.Error())
+			fmt.Println("ERROR SENDING TRACKER FILR DIA:", err.Error())
 			return
 		}
+		// fmt.Println("once HELLO FROM TRACKER CREATER")
 
 		lenOfChunk := uint64(bytesRead)
 
 		message := make([]byte, global.CHUNK_SIZE)
 
-		binary.LittleEndian.PutUint16(message, lenOfFilename)
+		
+		copy(message, buf)
 
-		binary.LittleEndian.PutUint64(message[2:], lenOfChunk)
-		copy(message[2+8:], []byte(filename))
-		copy(message[2+8+lenOfFilename:], buf)
+	
+		hashString := verifier.HashChunk(hasher,message)
 
-		hasher.Write(message)
-		hash := hasher.Sum(nil)
-		hashString := hex.EncodeToString(hash)
-
-		// fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", len(message))
+		fmt.Println("TRACKER SAN ChunkNo", chunkNo, "lenOfChunk", lenOfChunk, "Sending no of bytes", len(message))
 
 		file.WriteString(strconv.Itoa(chunkNo) + ":" + strconv.Itoa(len(message)) + ":" + hashString)
+		file.WriteString("\n")
 
 		hasher.Reset()
 		chunkNo++
 
+		if lenOfChunk<uint64(global.CHUNK_SIZE){
+
+			break
+		}
+
 	}
 
 }
+
+
 

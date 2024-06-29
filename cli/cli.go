@@ -32,7 +32,7 @@ func StartCli() {
 			fmt.Println("Hello there!")
 		case "startClient":
 			fmt.Println("starting server ")
-			directory :=handleDirectoryOperation(command,args[1:])
+			directory := handleDirectoryOperation(command, args[1:])
 			clientObj := client.InitalizeClient(directory)
 			StartClientCli(clientObj)
 
@@ -40,9 +40,8 @@ func StartCli() {
 
 		case "startMaster":
 			fmt.Println("starting master server ")
-			master:=master.InitalizeMaster()
+			master := master.InitalizeMaster()
 			fmt.Println(master)
-
 
 		case "help":
 			fmt.Println("Available commands:")
@@ -72,7 +71,6 @@ func StartClientCli(c client.ClientService) {
 		if len(command) == 0 {
 			return
 		}
-	
 
 		if command == "exit" {
 			break
@@ -80,11 +78,20 @@ func StartClientCli(c client.ClientService) {
 
 		switch command {
 		case "uploadFile":
-			filepath:=handleFileOperation(command,args[1:])
-			if isValidFilePath(filepath){
+			filepath := handleFileOperation(command, args[1:])
+			if isValidFilePath(filepath) {
 				c.UploadFile(filepath)
-					
-			} else{
+
+			} else {
+				fmt.Println("invalid path")
+			}
+
+		case "downloadFile":
+			filepath := handleFileOperation(command, args[1:])
+			if isValidFilePath(filepath) {
+				c.DownloadFile(filepath)
+
+			} else {
 				fmt.Println("invalid path")
 			}
 
@@ -124,11 +131,8 @@ func handleDirectoryOperation(operation string, args []string) string {
 		return ""
 	}
 
-	
-
 	return *directoryPath
 }
-
 
 func isValidFilePath(path string) bool {
 	_, err := os.Stat(path)
@@ -144,5 +148,3 @@ func isValidFilePath(path string) bool {
 	}
 	return true
 }
-
-

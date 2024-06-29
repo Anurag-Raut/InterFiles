@@ -21,24 +21,18 @@ type MasterService interface {
 	handleConnection(conn net.Conn)
 	addClient(reader *bufio.Reader)
 	announceFile(reader *bufio.Reader)
-
-
 }
 
-
-
 type Master struct {
-	ID       string
-	IP       string
-	Port     int
-	listener net.Listener
-	clientStore map[string]global.Client
-    fileStore   map[string]global.File
+	ID          string
+	IP          string
+	Port        int
+	listener    net.Listener
+	clientStore map[string]*global.Client
+	fileStore   map[string]*global.File
 }
 
 var CLIENT_FILE_PATH = "/home/anurag/projects/dfs/clients.txt"
-
-
 
 func getRoot(w http.ResponseWriter, r *http.Request) {
 	writer := bufio.NewWriter(w)
@@ -76,8 +70,8 @@ func (master *Master) Start() {
 	master.Port = addr.Port
 	master.IP = "127.0.0.1"
 	master.ID = cuid2.Generate()
-	master.clientStore= make(map[string]global.Client)
-	master.fileStore= make(map[string]global.File)
+	master.clientStore = make(map[string]*global.Client)
+	master.fileStore = make(map[string]*global.File)
 
 	go master.startAcceptingConn()
 
@@ -99,7 +93,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	var requestType uint8
 	err := binary.Read(reader, binary.LittleEndian, &requestType)
-	fmt.Println(requestType,"REQ_TYPE")
+	fmt.Println(requestType, "REQ_TYPE")
 	if err != nil {
 		// Handle error
 		fmt.Println("Error reading request type:", err)
@@ -116,7 +110,37 @@ func (master *Master) handleConnection(conn net.Conn) {
 		fmt.Println("BROTHER WE GOOD")
 		master.announceFile(reader)
 
+	case global.GET_SENDERS_FOR_FILE:
+		master.GetSendersForFile(reader, conn)
+	case global.ADD_SENDER_TO_FILE_STORE:
+		master.addFile(reader)
 
+	}
+
+}
+
+func (master *Master) addFile(reader *bufio.Reader) {
+	fmt.Println("yooooo boyyyy weeee added the file")
+	body, err := io.ReadAll(reader)
+
+	if err != nil {
+		fmt.Println("error reading body in addFile")
+		return
+	}
+	args := strings.Split(string(body), ":")
+	fileId := args[0]
+	clientId := args[1]
+
+	if file,exists:= master.fileStore[fileId]; !exists {
+		fmt.Println("DAMNN")
+		master.fileStore[fileId] = &global.File{
+			ID:      clientId,
+			Clients: []global.Client{*master.clientStore[clientId]},
+		}
+	} else {
+		fmt.Println("OH MY GAWWHHH",file)
+
+		file.Clients = append(file.Clients, *master.clientStore[clientId])
 	}
 
 }
@@ -132,6 +156,8 @@ func (master *Master) addClient(reader *bufio.Reader) {
 	fmt.Println(clientData, "client data")
 
 	args := strings.Split(clientData, ":")
+	fmt.Println(args[2], "PORTTOOOO")
+	fmt.Println(args[1], "IPPPOO")
 
 	newClient := global.Client{
 		ClientId:  args[0],
@@ -140,7 +166,7 @@ func (master *Master) addClient(reader *bufio.Reader) {
 		Directory: args[3],
 	}
 
-	master.clientStore[newClient.ClientId] = newClient
+	master.clientStore[newClient.ClientId] = &newClient
 
 	// fmt.Println(newClient,master.clientStore[newClient.ClientId],"CLIENTT")
 
@@ -156,33 +182,67 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 		return
 	}
 	//adding to file store
-	fmt.Println(string(body),"LESS GOOO")
+	fmt.Println(string(body), "LESS GOOO")
 	args := strings.Split(string(body), ":")
 	senderClientId := args[0]
 	fileId := args[1]
-	filename := args[2]
 	file := global.File{
-		Filename: filename,
-		ID:       fileId,
-		Clients:  []global.Client{master.clientStore[senderClientId]},
+		ID:      fileId,
+		Clients: []global.Client{*master.clientStore[senderClientId]},
 	}
 
-	fmt.Println("NEW FILE",file.Clients)
+	fmt.Println("NEW FILE", file.Clients)
 
-	for receiverClientId, _ := range master.clientStore {
+	for receiverClientId, client := range master.clientStore {
 		if receiverClientId == senderClientId {
 			continue
 		}
-		protocol.RequestFile(master.clientStore[receiverClientId], file)
+		fmt.Println("clientttt", *client, client.GetUrl())
+		protocol.RequestFile(*client, file)
 
 	}
 
 }
 
-func InitalizeMaster() MasterService {
-	var master MasterService = &Master{
+func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
+	fmt.Println("WE RAE GOING TO SEND SENDERS LIST")
+	fileidLen := uint16(0)
+	binary.Read(reader, binary.BigEndian, &fileidLen)
+	fileIdBuf := make([]byte, fileidLen)
+	_, err := reader.Read(fileIdBuf)
 
+	if err != nil {
+		fmt.Println("ERROR wjile reading fileid in master", err)
+		return
 	}
+
+	fileId := string(fileIdBuf)
+	fmt.Println("FILE ID", fileId)
+
+	var result string
+	if file, exists := master.fileStore[fileId]; exists && file != nil {
+		noOfSenders := len(file.Clients)
+
+		for index, client := range master.fileStore[fileId].Clients {
+
+			result += client.ClientId + ":" + client.Ip + ":" + client.Port
+			if index != noOfSenders-1 {
+				result += ":"
+			}
+		}
+
+	} else {
+		fmt.Println("couldnt access the file store")
+		return
+	}
+
+	conn.Write([]byte(result))
+	fmt.Println("CLIENTS STRING", result)
+	conn.Close()
+}
+
+func InitalizeMaster() MasterService {
+	var master MasterService = &Master{}
 
 	master.Start()
 

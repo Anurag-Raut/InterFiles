@@ -11,8 +11,10 @@ const (
 	REQUEST_FILE
 	ADD_CLIENT
 	ANNOUNCE
-	
-	
+	GET_SENDERS_FOR_FILE
+	DOWNLOAD_FILE
+	ADD_SENDER_TO_FILE_STORE
+
 
 )
 
@@ -32,13 +34,12 @@ func (c *Client) GetUrl() string {
 
 type File struct {
 	ID string
-	Filename string
 	Clients []Client
 
 
 
 }
 var CHUNK_SIZE = 1024
-var HEADER_LEN=2+8
+var HEADER_LEN=8
 
 //client
