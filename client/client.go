@@ -141,10 +141,10 @@ func (client *Client) handleConnection(conn net.Conn) {
 	case global.REQUEST_FILE:
 		client.RequestFile(reader, conn)
 	case global.DOWNLOAD_FILE:
-		protocol.SendFile(reader,conn,global.Client{
-			ClientId: client.ID,
-			Ip: client.IP,
-			Port: client.Port,
+		protocol.SendFile(reader, conn, global.Client{
+			ClientId:  client.ID,
+			Ip:        client.IP,
+			Port:      client.Port,
 			Directory: client.Directory,
 		})
 	}
@@ -156,20 +156,20 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 	totalLen := 0
 	var chunkNo = 0
 	var fileIdLen uint16
-	err:=binary.Read(reader,binary.BigEndian,&fileIdLen)
-	if err!=nil{
-		fmt.Println("Error in reading file name len",err.Error())
+	err := binary.Read(reader, binary.BigEndian, &fileIdLen)
+	if err != nil {
+		fmt.Println("Error in reading file name len", err.Error())
 		return
 	}
-	fileIdBuf:=make([]byte,fileIdLen)
-	_,err=reader.Read(fileIdBuf)
-	if err!= nil {
-		fmt.Println("Error in reading file name",err.Error())
+	fileIdBuf := make([]byte, fileIdLen)
+	_, err = reader.Read(fileIdBuf)
+	if err != nil {
+		fmt.Println("Error in reading file name", err.Error())
 
-		return 
+		return
 	}
 
-	fileId:=string(fileIdBuf)
+	fileId := string(fileIdBuf)
 
 	for {
 		chunk := make([]byte, global.CHUNK_SIZE)
@@ -187,8 +187,7 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 			}
 		}
 
-		
-		fmt.Println("chunkNo", chunkNo, "number of bytes", n,)
+		fmt.Println("chunkNo", chunkNo, "number of bytes", n)
 		chunkNo++
 		data := chunk
 
@@ -210,23 +209,17 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 
 	}
 	fmt.Println("WE COMPLETED DOWNLOADING NOW WE UPDATE ON MASTER")
-	masterConn,err:=net.Dial("tcp",global.MASTER_SERVER_URL)
+	masterConn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("ERROR OCCURENT WHIL COMNECTING TO MASTER SERVER")
-		return 
+		return
 	}
-	
-	binary.Write(masterConn,binary.BigEndian,global.ADD_SENDER_TO_FILE_STORE)
-	res:=fileId+":"+client.ID
-	fmt.Println(res,"REAASSSS")
+
+	binary.Write(masterConn, binary.BigEndian, global.ADD_SENDER_TO_FILE_STORE)
+	res := fileId + ":" + client.ID
+	fmt.Println(res, "REAASSSS")
 	masterConn.Write([]byte(res))
 	masterConn.Close()
-
-
-
-
-
-
 
 }
 
@@ -238,7 +231,7 @@ func (client *Client) pullFile(reader *bufio.Reader, conn net.Conn) {
 		fmt.Println("PULL FILE DAYUM", err.Error())
 		return
 	}
-	fmt.Println(fileIdLen,"LEEENENENENE")
+	fmt.Println(fileIdLen, "LEEENENENENE")
 	var fileId string
 	fileidBuf := make([]byte, fileIdLen)
 
@@ -248,7 +241,7 @@ func (client *Client) pullFile(reader *bufio.Reader, conn net.Conn) {
 		fmt.Println("Binary Read", err.Error())
 		return
 	}
-	fileId=string(fileidBuf)
+	fileId = string(fileidBuf)
 	fmt.Println("ZQUU", client.Directory+fileId)
 
 	file, err := os.OpenFile(client.Directory+fileId, os.O_RDONLY, 0)
@@ -345,17 +338,15 @@ func (client *Client) UploadFile(filePath string) {
 		return
 	}
 
-
-	tracker.CreateTrackerFile(destFile,client.ID,fileId)
+	tracker.CreateTrackerFile(destFile, client.ID, fileId)
 	protocol.AnnounceFile(fileId, file.Name(), client.ID)
 	defer destFile.Close()
 	defer file.Close()
 }
 
-
 func (client *Client) DownloadFile(trackerFilePath string) {
 
-	trackerFile,err:=os.Open(trackerFilePath)
+	trackerFile, err := os.Open(trackerFilePath)
 	if err != nil {
 		fmt.Println("Error opening tracker file")
 		return
@@ -366,41 +357,29 @@ func (client *Client) DownloadFile(trackerFilePath string) {
 	// Read the first line (file ID)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			 fmt.Println("error reading tracker file: %w", err)
-			 return
+			fmt.Println("error reading tracker file: %w", err)
+			return
 		}
-		 fmt.Println("tracker file is empty")
-		 return
+		fmt.Println("tracker file is empty")
+		return
 	}
 
 	fileId := scanner.Text()
 
-	potentialSender,err:=protocol.GetSendersFromMaster(fileId)
-	if err !=nil {
+	potentialSender, err := protocol.GetSendersFromMaster(fileId)
+	if err != nil {
 		fmt.Println("ERROR while getting clients data")
-		return 
+		return
 	}
 
-
-
-
 	protocol.DownloadFile(global.Client{
-		ClientId: client.ID,
-		Ip: client.IP,
-		Port: client.Port,
+		ClientId:  client.ID,
+		Ip:        client.IP,
+		Port:      client.Port,
 		Directory: client.Directory,
-	},fileId,potentialSender,trackerFile)
+	}, fileId, potentialSender, trackerFile)
 
-
-
-
-
-
-
-
-
-	
-}	
+}
 
 func InitalizeClient(directory string) ClientService {
 	var client ClientService = &Client{

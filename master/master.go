@@ -131,14 +131,14 @@ func (master *Master) addFile(reader *bufio.Reader) {
 	fileId := args[0]
 	clientId := args[1]
 
-	if file,exists:= master.fileStore[fileId]; !exists {
+	if file, exists := master.fileStore[fileId]; !exists {
 		fmt.Println("DAMNN")
 		master.fileStore[fileId] = &global.File{
 			ID:      clientId,
 			Clients: []global.Client{*master.clientStore[clientId]},
 		}
 	} else {
-		fmt.Println("OH MY GAWWHHH",file)
+		fmt.Println("OH MY GAWWHHH", file)
 
 		file.Clients = append(file.Clients, *master.clientStore[clientId])
 	}

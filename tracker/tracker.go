@@ -43,9 +43,9 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 	hasher := sha512.New()
 
 	for {
-		buf := make([]byte, global.CHUNK_SIZE)
+		message := make([]byte, global.CHUNK_SIZE)
 
-		bytesRead, err := ogFile.Read(buf)
+		bytesRead, err := ogFile.Read(message)
 		totlBytes += bytesRead
 		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
 		if err != nil {
@@ -66,10 +66,8 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 
 		lenOfChunk := uint64(bytesRead)
 
-		message := make([]byte, global.CHUNK_SIZE)
 
 		
-		copy(message, buf)
 
 	
 		hashString := verifier.HashChunk(hasher,message)
