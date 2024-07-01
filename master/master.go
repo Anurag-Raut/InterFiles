@@ -2,10 +2,10 @@ package master
 
 import (
 	"bufio"
-	"dfs/global"
-	"dfs/protocol"
 	"encoding/binary"
 	"fmt"
+	"interfiles/global"
+	"interfiles/protocol"
 	"io"
 	"net"
 	"net/http"
@@ -32,14 +32,14 @@ type Master struct {
 	fileStore   map[string]*global.File
 }
 
-var CLIENT_FILE_PATH = "/home/anurag/projects/dfs/clients.txt"
-
 func getRoot(w http.ResponseWriter, r *http.Request) {
 	writer := bufio.NewWriter(w)
 	writer.WriteString("hello")
 	writer.Flush()
 
 }
+
+var replicationFactor = 3
 
 func (master *Master) Start() {
 
@@ -50,13 +50,13 @@ func (master *Master) Start() {
 
 	for i := 0; i < maxRetries; i++ {
 		port := basePort + i
-		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
+		listener, err = net.Listen("tcp4", fmt.Sprintf(":%d", port))
 		if err == nil {
 			// Successfully bound to a port
 			fmt.Printf("Master Server is listening on port %d\n", port)
 			break
 		}
-		fmt.Printf("Failed to bind to port %d: %s. Trying next port...\n", port, err)
+		// fmt.Printf("Failed to bind to port %d: %s. Trying next port...\n", port, err)
 		time.Sleep(time.Second)
 	}
 	if err != nil {
@@ -93,7 +93,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	var requestType uint8
 	err := binary.Read(reader, binary.LittleEndian, &requestType)
-	fmt.Println(requestType, "REQ_TYPE")
+	// fmt.Println(requestType, "REQ_TYPE")
 	if err != nil {
 		// Handle error
 		fmt.Println("Error reading request type:", err)
@@ -107,7 +107,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 		master.addClient(reader)
 
 	case global.ANNOUNCE:
-		fmt.Println("BROTHER WE GOOD")
+		// fmt.Println("BROTHER WE GOOD")
 		master.announceFile(reader)
 
 	case global.GET_SENDERS_FOR_FILE:
@@ -120,7 +120,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 }
 
 func (master *Master) addFile(reader *bufio.Reader) {
-	fmt.Println("yooooo boyyyy weeee added the file")
+	// fmt.Println("yooooo boyyyy weeee added the file")
 	body, err := io.ReadAll(reader)
 
 	if err != nil {
@@ -132,33 +132,27 @@ func (master *Master) addFile(reader *bufio.Reader) {
 	clientId := args[1]
 
 	if file, exists := master.fileStore[fileId]; !exists {
-		fmt.Println("DAMNN")
+		// fmt.Println("DAMNN")
 		master.fileStore[fileId] = &global.File{
 			ID:      clientId,
 			Clients: []global.Client{*master.clientStore[clientId]},
 		}
 	} else {
-		fmt.Println("OH MY GAWWHHH", file)
-
 		file.Clients = append(file.Clients, *master.clientStore[clientId])
 	}
 
 }
 
 func (master *Master) addClient(reader *bufio.Reader) {
-	fmt.Println("LESS FUCKING GOOOO")
+	// fmt.Println("LESS FUCKING GOOOO")
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		fmt.Println("error reading body in addClient")
 		return
 	}
 	clientData := string(body)
-	fmt.Println(clientData, "client data")
-
 	args := strings.Split(clientData, ":")
-	fmt.Println(args[2], "PORTTOOOO")
-	fmt.Println(args[1], "IPPPOO")
-
+	// fmt.Println(args[2], "PORTTOOOO")
 	newClient := global.Client{
 		ClientId:  args[0],
 		Ip:        args[1],
@@ -167,8 +161,6 @@ func (master *Master) addClient(reader *bufio.Reader) {
 	}
 
 	master.clientStore[newClient.ClientId] = &newClient
-
-	// fmt.Println(newClient,master.clientStore[newClient.ClientId],"CLIENTT")
 
 }
 
@@ -182,7 +174,7 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 		return
 	}
 	//adding to file store
-	fmt.Println(string(body), "LESS GOOO")
+	// fmt.Println(string(body), "LESS GOOO")
 	args := strings.Split(string(body), ":")
 	senderClientId := args[0]
 	fileId := args[1]
@@ -191,21 +183,23 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 		Clients: []global.Client{*master.clientStore[senderClientId]},
 	}
 
-	fmt.Println("NEW FILE", file.Clients)
-
 	for receiverClientId, client := range master.clientStore {
+		if len(file.Clients) >= replicationFactor {
+			fmt.Println("LEN FILE CLIENT", len(file.Clients))
+			break
+		}
 		if receiverClientId == senderClientId {
 			continue
 		}
 		fmt.Println("clientttt", *client, client.GetUrl())
-		protocol.RequestFile(*client, file)
+		protocol.RequestToPullFile(*client, file)
 
 	}
 
 }
 
 func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
-	fmt.Println("WE RAE GOING TO SEND SENDERS LIST")
+	// fmt.Println("WE RAE GOING TO SEND SENDERS LIST")
 	fileidLen := uint16(0)
 	binary.Read(reader, binary.BigEndian, &fileidLen)
 	fileIdBuf := make([]byte, fileidLen)
@@ -217,8 +211,6 @@ func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
 	}
 
 	fileId := string(fileIdBuf)
-	fmt.Println("FILE ID", fileId)
-
 	var result string
 	if file, exists := master.fileStore[fileId]; exists && file != nil {
 		noOfSenders := len(file.Clients)
@@ -237,16 +229,16 @@ func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
 	}
 
 	conn.Write([]byte(result))
-	fmt.Println("CLIENTS STRING", result)
+	// fmt.Println("CLIENTS STRING", result)
 	conn.Close()
 }
 
-func InitalizeMaster() MasterService {
+func InitalizeMaster() {
 	var master MasterService = &Master{}
 
 	master.Start()
 
-	return master
+	// return master
 }
 
 //todo

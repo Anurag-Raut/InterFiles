@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha512"
-	"dfs/global"
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"interfiles/global"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -23,32 +24,35 @@ func HashChunk(hasher hash.Hash, content []byte) string {
 	return hashString
 }
 
-func VerifyFile(file, trackerFile *os.File) (bool, error) {
-
+func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 	file.Seek(0, 0)
+	trackerFile.Seek(0,0)
 	hasher := sha512.New()
 	chunkNo := 0
 	trackerScanner := bufio.NewScanner(trackerFile)
-
+	var chunksWanted []string
 	for i := 0; i < 2; i++ {
 		if !trackerScanner.Scan() {
 			if trackerScanner.Err() != nil {
-				return false, trackerScanner.Err()
+				return false ,nil, trackerScanner.Err()
 			}
-			return false, fmt.Errorf("file has fewer than %d lines", i)
+			return false,nil, fmt.Errorf("file has fewer than %d lines", i)
+		}else {
+			trackerScanner.Text()
 		}
 	}
 
 	for {
 		buf := make([]byte, global.CHUNK_SIZE)
-		bytesReaded, err := trackerFile.Read(buf)
-		if err != nil {
-			fmt.Println("ERROR", err.Error())
-			return false, err
+		bytesReaded, bufError := file.Read(buf)
+		if bufError != nil  && bufError!= io.EOF{
+			fmt.Println("ERROR", bufError.Error())
+			return false,nil, bufError
 		}
 
+
 		if !trackerScanner.Scan() {
-			return false, fmt.Errorf("error ")
+			return false,nil, fmt.Errorf("error ")
 
 		}
 
@@ -57,48 +61,54 @@ func VerifyFile(file, trackerFile *os.File) (bool, error) {
 		trackerChunkno := trackerLineData[0]
 		// chunkSize:=trackerLineData[1]
 		hashHex := trackerLineData[2]
-		fmt.Println(trackerChunkno, "trackerChunknumber")
-
+		// fmt.Println(trackerChunkno, "trackerChunknumber")
+		buf = buf[:bytesReaded]
 		hashBytes, err := hex.DecodeString(hashHex)
 		if err != nil {
-			return false, err
+			return false,nil, err
 
 		}
+		hasher.Reset()
 		hasher.Write(buf)
 		hash := hasher.Sum(nil)
 		trackerChunknoInt, err := strconv.Atoi(trackerChunkno)
 		if err != nil {
 
-			return false, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
+			return false,nil, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
 		}
 
 		if trackerChunknoInt != chunkNo {
-			return false, fmt.Errorf("chunk mismatch: %v", err)
+			
+			return false,nil, fmt.Errorf("order mismatch trackerChunkNo : %d , actual chunk : %d",trackerChunknoInt,chunkNo)
 
 		}
+		chunkNo++
+
 
 		if !bytes.Equal(hash, hashBytes) {
-			return false, fmt.Errorf("error while verifying chunk %s ", trackerChunkno)
+			fmt.Println("NOT MATCHING",chunkNo-1,hashHex)
+			chunksWanted=append(chunksWanted, trackerChunkno)
+			continue
 		}
 		hasher.Reset()
 
-		if bytesReaded < global.CHUNK_SIZE {
+		if bytesReaded < global.CHUNK_SIZE  || bufError==io.EOF{
 
 			break
 		}
 
-		chunkNo++
 
 	}
 
-	return true, nil
+	return true,chunksWanted, nil
 
 }
 
 func VerifyChunk(chunk []byte, chunkno uint64, trackerFile *os.File, hasher hash.Hash) error {
+	// fmt.Println("VERIFYING CHUNK ", chunkno)
 	trackerFile.Seek(0, 0)
 	trackerScanner := bufio.NewScanner(trackerFile)
-	fmt.Println("chunko", chunkno)
+	// fmt.Println("chunko", chunkno)
 	for i := 0; i < 2; i++ {
 		if !trackerScanner.Scan() {
 			if trackerScanner.Err() != nil {
@@ -106,7 +116,8 @@ func VerifyChunk(chunk []byte, chunkno uint64, trackerFile *os.File, hasher hash
 			}
 			return fmt.Errorf("file has fewer than %d lines", i)
 		} else {
-			fmt.Println("skipping Line", trackerScanner.Text())
+			// fmt.Println("skipping Line", trackerScanner.Text())
+			trackerScanner.Text()
 		}
 
 	}
@@ -118,23 +129,22 @@ func VerifyChunk(chunk []byte, chunkno uint64, trackerFile *os.File, hasher hash
 			}
 			return fmt.Errorf("file has fewer than %d lines", i)
 		} else {
-			fmt.Println("skipping Line", trackerScanner.Text())
+			trackerScanner.Text()
+			// fmt.Println("skipping Line", trackerScanner.Text())
 		}
-
 	}
+
 	if !trackerScanner.Scan() {
 		if trackerScanner.Err() != nil {
 			return trackerScanner.Err()
 		}
 		return fmt.Errorf("file has fewer  lines")
 	} else {
-		fmt.Println("current", trackerScanner.Text())
+		trackerScanner.Text()
 	}
-	trackerChunkData := strings.Split((trackerScanner.Text()), ":")
+	trackerChunkData := strings.Split(trackerScanner.Text(), ":")
 	trackerchunkNo := trackerChunkData[0]
 	chunkHashHex := trackerChunkData[2]
-	fmt.Println(chunkHashHex, "chunkHashHex")
-
 	trackerChunkNoInt, err := strconv.Atoi(trackerchunkNo)
 	if err != nil {
 		fmt.Println(trackerChunkNoInt, "trackerChunkInt")
@@ -157,7 +167,7 @@ func VerifyChunk(chunk []byte, chunkno uint64, trackerFile *os.File, hasher hash
 	hasher.Reset()
 
 	if !bytes.Equal(hashBytes, calcHash) {
-		fmt.Println("CALCHASH",calcHash,"HASHBYTES",hashBytes)
+		fmt.Println("tracker chunk hex", chunkHashHex, "calc hex", hex.EncodeToString(calcHash))
 		return fmt.Errorf("chunks not match ing ")
 
 	}

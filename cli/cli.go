@@ -2,22 +2,31 @@ package cli
 
 import (
 	"bufio"
-	"dfs/client"
-	"dfs/master"
 	"flag"
 	"fmt"
+	"interfiles/client"
+	"interfiles/master"
 	"os"
 	"strings"
+
+	"github.com/fatih/color"
 )
+
+var errorPrint = color.New(color.FgWhite, color.BgRed).Add(color.Bold)
 
 func StartCli() {
 
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	args := strings.Fields(input)
+	fmt.Printf(
+		"Welcome to %v! These are the available commands: \n",
+		"InterFiles",
+	)
+	fmt.Println("help    - Show available commands")
+	fmt.Println("exit    - Exit ")
+	fmt.Println("client - Starts Client")
+	fmt.Println("master - Starts Master")
 
-	command := args[0]
+	reader := bufio.NewReader(os.Stdin)
+
 	for {
 		fmt.Print("> ")
 
@@ -27,21 +36,29 @@ func StartCli() {
 		if input == "exit" {
 			break
 		}
+
+		args := strings.Fields(input)
+
+		command := args[0]
+
 		switch command {
 		case "hello":
 			fmt.Println("Hello there!")
-		case "startClient":
-			fmt.Println("starting server ")
+		case "client":
+			// fmt.Println("starting server ")
 			directory := handleDirectoryOperation(command, args[1:])
-			clientObj := client.InitalizeClient(directory)
+			clientObj, err := client.InitalizeClient(directory)
+			if err != nil {
+				errorPrint.Print(err)
+				fmt.Println("")
+				return
+			}
 			StartClientCli(clientObj)
 
-		case "sendFile":
-
-		case "startMaster":
+		case "master":
 			fmt.Println("starting master server ")
-			master := master.InitalizeMaster()
-			fmt.Println(master)
+			master.InitalizeMaster()
+			// fmt.Println(master)
 
 		case "help":
 			fmt.Println("Available commands:")
@@ -64,12 +81,15 @@ func StartClientCli(c client.ClientService) {
 
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
+		if len(input) == 0 {
+			continue
+		}
 		args := strings.Fields(input)
 
 		command := args[0]
 
 		if len(command) == 0 {
-			return
+			continue
 		}
 
 		if command == "exit" {
@@ -77,22 +97,23 @@ func StartClientCli(c client.ClientService) {
 		}
 
 		switch command {
-		case "uploadFile":
+		case "upload":
 			filepath := handleFileOperation(command, args[1:])
 			if isValidFilePath(filepath) {
-				c.UploadFile(filepath)
+				err := c.AnnounceFile(filepath)
+				if err != nil {
+					errorPrint.Print(err)
+					fmt.Println("")
+					return
+				}
 
-			} else {
-				fmt.Println("invalid path")
 			}
 
-		case "downloadFile":
+		case "download":
 			filepath := handleFileOperation(command, args[1:])
 			if isValidFilePath(filepath) {
 				c.DownloadFile(filepath)
 
-			} else {
-				fmt.Println("invalid path")
 			}
 
 		}
@@ -104,7 +125,7 @@ func StartClientCli(c client.ClientService) {
 func handleFileOperation(operation string, args []string) string {
 	// Define flags
 	flagSet := flag.NewFlagSet(operation, flag.ContinueOnError)
-	filePath := flagSet.String("f", "", "File path for "+operation)
+	filePath := flagSet.String("p", "", "File path for "+operation)
 
 	err := flagSet.Parse(args)
 	if err != nil {
@@ -113,7 +134,7 @@ func handleFileOperation(operation string, args []string) string {
 	}
 
 	if *filePath == "" {
-		fmt.Println("Please specify a file path using the -f flag")
+		fmt.Println("Please specify a file path using the -p flag")
 		return ""
 	}
 
@@ -135,6 +156,9 @@ func handleDirectoryOperation(operation string, args []string) string {
 }
 
 func isValidFilePath(path string) bool {
+	if path == "" {
+		return false
+	}
 	_, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {

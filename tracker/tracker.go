@@ -2,9 +2,9 @@ package tracker
 
 import (
 	"crypto/sha512"
-	"dfs/global"
-	"dfs/verifier"
 	"fmt"
+	"interfiles/global"
+	"interfiles/verifier"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,11 +12,17 @@ import (
 	"time"
 )
 
-func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
-	fmt.Println("HELLO FROM TRACKER CREATER")
+func CreateTrackerFile(ogFile *os.File, clientId string, fileId string, directory string) {
+	fmt.Println("Creating you tracker file")
 	ogFile.Seek(0, 0)
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("failed to get current directory: %w", err)
+		return
+	}
 	filename := filepath.Base(ogFile.Name())
-	file, err := os.Create(fmt.Sprintf("/home/anurag/projects/dfs/tracker_files/%s_tracker.txt", fileId))
+
+	file, err := os.Create(filepath.Join(currentDir, fmt.Sprintf("tracker_files/%s_tracker.txt", fileId)))
 	if err != nil {
 		fmt.Println("Error creatinf file", err.Error())
 		return
@@ -34,10 +40,8 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 	file.WriteString(fmt.Sprintf("%s:%s:%d:%s", filename, date, fileInfo.Size(), clientId))
 	file.WriteString("\n")
 
-	fmt.Println("once HELLO FROM TRACKER CREATER")
-
 	//chunks
-	
+
 	totlBytes := 0
 	var chunkNo = 0
 	hasher := sha512.New()
@@ -50,7 +54,7 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
 		if err != nil {
 
-			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
+			// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
 			if err != io.EOF {
 
 				fmt.Println("WE FUCKING TRACKER BOYS", err.Error())
@@ -62,17 +66,11 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 			fmt.Println("ERROR SENDING TRACKER FILR DIA:", err.Error())
 			return
 		}
-		// fmt.Println("once HELLO FROM TRACKER CREATER")
-
 		lenOfChunk := uint64(bytesRead)
 
+		message = message[:bytesRead]
 
-		
-
-	
-		hashString := verifier.HashChunk(hasher,message)
-
-		fmt.Println("TRACKER SAN ChunkNo", chunkNo, "lenOfChunk", lenOfChunk, "Sending no of bytes", len(message))
+		hashString := verifier.HashChunk(hasher, message)
 
 		file.WriteString(strconv.Itoa(chunkNo) + ":" + strconv.Itoa(len(message)) + ":" + hashString)
 		file.WriteString("\n")
@@ -80,14 +78,12 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string) {
 		hasher.Reset()
 		chunkNo++
 
-		if lenOfChunk<uint64(global.CHUNK_SIZE){
+		if lenOfChunk < uint64(global.CHUNK_SIZE) {
 
+			fmt.Printf("Tracker file %s created in directory : %s \n", fileId+"_tracker.txt", directory)
 			break
 		}
 
 	}
 
 }
-
-
-

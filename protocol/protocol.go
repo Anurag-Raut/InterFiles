@@ -3,10 +3,18 @@ package protocol
 import (
 	"bufio"
 	"crypto/sha512"
-	"dfs/global"
 	"encoding/binary"
+
+	// "encoding/hex"
 	"fmt"
 	"hash"
+	"interfiles/global"
+
+	"interfiles/verifier"
+
+	// "interfiles/verifier"
+
+	// "interfiles/verifier"
 	"io"
 	"net"
 	"path/filepath"
@@ -34,19 +42,15 @@ func handleConnection(conn net.Conn) {
 
 	_, err = reader.Read(buf)
 	if err != nil {
-		fmt.Println("error reading message:", err.Error())
-
 		return
 
 	}
-
-	fmt.Println(string(buf))
 
 }
 
 func SendMessage(message string) {
 	// Connect to the server
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp4", ":8080")
 	if err != nil {
 		fmt.Println("Failed to connect to the server:", err)
 		return
@@ -75,20 +79,19 @@ func SendMessage(message string) {
 	fmt.Println("Message sent successfully")
 }
 
-func AnnounceFile(fileId, filename, clientId string) {
+func AnnounceFile(fileId, filename, clientId string) error {
 
-	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
 	if err != nil {
-		fmt.Println("Failed to connect to the server:", err)
-		return
+		return fmt.Errorf("failed to connect to the server: %v", err)
 	}
 	binary.Write(conn, binary.BigEndian, global.ANNOUNCE)
 	file_body := clientId + ":" + fileId + ":" + filename
 	conn.Write([]byte(file_body))
 	defer conn.Close()
 
-	fmt.Println("DONE WITH ANNOUNCING FILE")
-
+	fmt.Println("Your file  is announced to master , you can check the status using \"start\" ")
+	return nil
 }
 
 func UploadToClient(file *os.File, conn net.Conn) {
@@ -100,17 +103,16 @@ func UploadToClient(file *os.File, conn net.Conn) {
 	binary.Write(conn, binary.BigEndian, lenOfFilename)
 
 	conn.Write([]byte(filename))
-
 	for {
 
-		buf := make([]byte, global.CHUNK_SIZE)
+		message := make([]byte, global.CHUNK_SIZE)
 
-		bytesRead, err := file.Read(buf)
+		bytesRead, err := file.Read(message)
 		totlBytes += bytesRead
 		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
 		if err != nil {
 
-			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
+			// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
 			if err == io.EOF {
 
 			} else {
@@ -119,26 +121,17 @@ func UploadToClient(file *os.File, conn net.Conn) {
 			}
 		}
 
-		if err != nil {
-			fmt.Println("ERROR SENDING FILR DIA:", err.Error())
-			return
-		}
-
-		message := make([]byte, global.CHUNK_SIZE)
-
-		copy(message, buf)
-
-		fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", len(message))
+		// fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", len(message))
 		chunkNo++
+		binary.Write(conn, binary.BigEndian, uint16(bytesRead))
+
 		conn.Write(message)
 
 		ackBuf := make([]byte, 1)
 		conn.Read(ackBuf)
 
-		if bytesRead < len(buf) {
+		if err == io.EOF {
 			//eof
-
-			fmt.Println("totlBytes", totlBytes)
 
 			break
 
@@ -152,7 +145,7 @@ func UploadToClient(file *os.File, conn net.Conn) {
 
 func HandShake(receiver, sender global.Client) error {
 	//sender handshake
-	conn, err := net.Dial("tcp", sender.GetUrl())
+	conn, err := net.Dial("tcp4", sender.GetUrl())
 	if err != nil {
 		fmt.Println("Error occured ", err.Error())
 		return err
@@ -171,13 +164,13 @@ func HandShake(receiver, sender global.Client) error {
 
 	conn.Close()
 
-	conn, err = net.Dial("tcp", receiver.GetUrl())
+	conn, err = net.Dial("tcp4", receiver.GetUrl())
 	if err != nil {
 		fmt.Println("Error occured ", err.Error())
 		return err
 	}
 
-	conn.Write([]byte{byte(global.CLIENT_HANDSHAKE)})
+	conn.Write([]byte{byte(global.RECEIVER_HANDSHAKE)})
 
 	err = binary.Read(conn, binary.BigEndian, &status)
 	if err != nil {
@@ -199,30 +192,38 @@ func HandShake(receiver, sender global.Client) error {
 // 	// receiver <- sender
 // 	// make connection to sneder and ask for file
 
-// 	conn,err:=net.Dial("tcp",sender.GetUrl())
+// 	conn,err:=net.Dial("tcp4",sender.GetUrl())
 
 // 	binary.Write(conn,binary.LittleEndian,global.SENDER_PULLFILE)
 
 // }
 
-func RequestFile(receiver global.Client, file global.File) {
-	fmt.Println("REQUESTING FIlE")
+func RequestToPullFile(receiver global.Client, file global.File) {
+	// fmt.Println("REQUESTING FIlE")
+	//finding potential senders to get the file
 	for _, sender := range file.Clients {
-		fmt.Println("THIS DUDE IS POTENTIAL sender")
+		fmt.Println("THIS DUDE IS POTENTIAL sender", sender.GetUrl())
 		// protocol.HandShake(receiver,sender)
 
-		conn, err := net.Dial("tcp", receiver.GetUrl())
+		conn, err := net.Dial("tcp4", receiver.GetUrl())
 		if err != nil {
 			fmt.Println("ERROR", err.Error())
 			return
 
 		}
+		err = HandShake(receiver, sender)
+		if err != nil {
+			fmt.Println("HANDSHAKE FAILED TRY ANOTHER ONE")
+			continue
 
-		binary.Write(conn, binary.BigEndian, global.REQUEST_FILE)
+		}
+
+		binary.Write(conn, binary.BigEndian, global.REQUEST_TO_PULL_FILE)
 		fmt.Println(sender.GetUrl()+":"+file.ID, sender.Ip, "YOO asd")
 		conn.Write([]byte(sender.GetUrl() + ":" + file.ID))
 
 		conn.Close()
+		break
 
 	}
 
@@ -230,7 +231,7 @@ func RequestFile(receiver global.Client, file global.File) {
 
 func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 
-	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("Error getting clients", err.Error())
 		return nil, err
@@ -275,31 +276,38 @@ func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 }
 
 func DownloadFile(receiver global.Client, fileId string, clients []global.Client, trackerFile *os.File) {
-	file, err := os.OpenFile(receiver.Directory+"newww"+fileId, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	file, err := os.OpenFile(receiver.Directory+"newww"+fileId, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		fmt.Println("Error while opening the write file", err.Error())
 		return
 	}
 	var chunksWanted []string = nil
-	fmt.Println("Starting downloading file ")
-
 	for _, client := range clients {
-
-		downloadFileFromClient(client, file, chunksWanted, trackerFile, fileId)
-		break
+		HandShake(receiver, client)
+		chunksWanted, err = downloadFileFromClient(client, file, chunksWanted, trackerFile, fileId)
+		if err == nil {
+			fmt.Println("DOWNLOADED FILE FROM ", client.GetUrl())
+			break
+		} else if err != nil {
+			continue
+		} else if chunksWanted == nil {
+			continue
+		} else if len(chunksWanted) == 0 {
+			break
+		}
 
 	}
+
+	defer file.Close()
 
 }
 
 func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []string, trackerFile *os.File, fileId string) ([]string, error) {
 	//receiving side
 	hasher := sha512.New()
-	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER",sender.GetUrl())
-	conn, err := net.Dial("tcp", sender.GetUrl())
+	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER", sender.GetUrl())
+	conn, err := net.Dial("tcp4", sender.GetUrl())
 	if err != nil {
-		fmt.Println("Erorr while connecting to a sender ")
-
 		return chunksWanted, err
 	}
 
@@ -310,69 +318,71 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 	conn.Write([]byte(fileId))
 	if chunksWanted == nil {
 		//data flag
-		fmt.Println("SENDING RECEIVED", uint8(0))
-
 		binary.Write(conn, binary.BigEndian, uint8(0))
 
 	} else {
-		fmt.Println("SENDING RECEIVED", uint8(1))
-
 		binary.Write(conn, binary.BigEndian, uint8(1))
 		chunksFormated := strings.Join(chunksWanted, ":")
 		conn.Write([]byte(chunksFormated))
 		conn.Write([]byte{'\x04'})
 	}
 
-	var newChunksWanted []string
-
 	reader := bufio.NewReader(conn)
 
 	for {
 		buf := make([]byte, global.CHUNK_SIZE+8)
+		var noOfBytes uint16
+		binary.Read(reader, binary.BigEndian, &noOfBytes)
+		bytesRead, buferr := reader.Read(buf)
 
-		bytesRead, err := reader.Read(buf)
-		if err != nil {
-			if err==io.EOF{
-				fmt.Println("WE GO EOF BOZZ")
-			}else{
+		if buferr != nil {
+			if buferr == io.EOF {
+			} else {
 
 				fmt.Println("Error while reading a chunk", err.Error())
-				return chunksWanted, err
+				return chunksWanted, buferr
 			}
 		}
 
+		if noOfBytes == 0 {
+			break
+		}
+		// fmt.Println(noOfBytes, "AADSDSD")
 		chunkNo := binary.BigEndian.Uint64(buf)
-		fmt.Println("CHUBKNO", chunkNo)
-		data := buf[8:]
-		conn.Write([]byte{1})
+		// fmt.Println("CHUBKNO", chunkNo)
+
+		data := buf[8 : 8+noOfBytes]
+		// fmt.Println("STRING DATA RECEIVED : ", string(buf))
 		err = writeChunkToFile(chunkNo, data, file, trackerFile, hasher)
 		if err != nil {
-			fmt.Println("ERROR while verifying chunk", err)
-			newChunksWanted = append(newChunksWanted, fmt.Sprintf("%d", chunkNo))
+			fmt.Println("ALRIGHT BOYZ WE DONE ", err.Error())
+			break
 
 		}
+		conn.Write([]byte{1})
 
-		if bytesRead < global.CHUNK_SIZE+8 {
+		if buferr == io.EOF {
 			fmt.Println("WE DONE BOYSZZ", bytesRead)
 			break
 		}
 
 	}
-	fmt.Println("WE OUTTA LOOp")
 
+	_, newChunksWanted, err := verifier.VerifyFile(file, trackerFile)
+
+	if err != nil {
+		fmt.Println("ERROR", err.Error())
+		return nil, err
+	}
 	if len(newChunksWanted) > 0 {
 		return newChunksWanted, nil
 	}
-	return nil, nil
+	return []string{}, nil
 
 }
 
 func writeChunkToFile(chunkno uint64, chunk []byte, file *os.File, trackerFile *os.File, hasher hash.Hash) error {
 
-	// err := verifier.VerifyChunk(chunk, chunkno, trackerFile, hasher)
-	// if err != nil {
-	// 	return err
-	// }
 	file.Seek(int64(chunkno)*int64(global.CHUNK_SIZE), 0)
 	file.Write(chunk)
 
@@ -427,7 +437,7 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 			if err != nil {
 
-				fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
+				// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
 				if err == io.EOF {
 
 				} else {
@@ -445,7 +455,7 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 			copy(message, buf)
 
-			fmt.Println("ChunkNo", chunkNo, "Sending no of bytes", len(message))
+			// fmt.Println("ChunkNo", chunkNo, "Sending no of bytes", len(message))
 			conn.Write(message)
 
 			ackBuf := make([]byte, 1)
@@ -460,12 +470,12 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 			message := make([]byte, global.CHUNK_SIZE+8)
 			binary.BigEndian.PutUint64(message, chunkNo)
-			bytesRead, err := filetoSend.Read(message[8:])
+			bytesRead, readErr := filetoSend.Read(message[8:])
 			// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
-			if err != nil {
+			if readErr != nil {
 
-				fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
-				if err == io.EOF {
+				// fmt.Println("ERROR OCCURED WHILE READING BYTES", readErr.Error())
+				if readErr == io.EOF {
 
 				} else {
 					fmt.Println("WE FUCKING RETURNING BOYS")
@@ -473,21 +483,23 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 				}
 			}
 
-			if err != nil {
-				fmt.Println("ERROR SENDING FILR DIA:", err.Error())
-				return
-			}
+			binary.Write(conn, binary.BigEndian, uint16(bytesRead))
+			hasher := sha512.New()
+			hasher.Write(message[8 : 8+bytesRead])
 
-			fmt.Println("ChunkNo", chunkNo, "Sending no of bytes", len(message))
+			// fmt.Println("sending chunk", chunkNo, bytesRead, "HASH", hex.EncodeToString(hasher.Sum(nil)))
 			chunkNo++
-			conn.Write(message)
-
+			_, err := conn.Write(message)
+			if err != nil {
+				fmt.Println("WRITING error", err.Error())
+				break
+			}
 			ackBuf := make([]byte, 1)
 			reader.Read(ackBuf)
 
-			if bytesRead < len(message)-8 {
+			if readErr == io.EOF {
 				//eof
-
+				// fmt.Println("BAN EM")
 				break
 
 			}

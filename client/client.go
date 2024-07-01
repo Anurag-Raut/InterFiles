@@ -2,11 +2,11 @@ package client
 
 import (
 	"bufio"
-	"dfs/global"
-	"dfs/protocol"
-	"dfs/tracker"
 	"encoding/binary"
 	"fmt"
+	"interfiles/global"
+	"interfiles/protocol"
+	"interfiles/tracker"
 	"io"
 	"path/filepath"
 	"strconv"
@@ -21,12 +21,12 @@ import (
 )
 
 type ClientService interface {
-	Start()
-	AddToServer()
-	UploadFile(filepath string)
+	Start() error
+	AddToServer() error
+	AnnounceFile(filepath string) error
 	startAcceptingConn()
 	handleConnection(conn net.Conn)
-	handleFileChunk(filename string, chunk []byte)
+	handleFileChunk(file *os.File, chunk []byte)
 	startReqFileLoop()
 	DownloadFile(trackerFilePath string)
 }
@@ -44,7 +44,7 @@ const (
 	GET_FILE = iota
 )
 
-func (client *Client) Start() {
+func (client *Client) Start() error {
 	basePort := 8080
 	maxRetries := 12
 	var listener net.Listener
@@ -52,41 +52,51 @@ func (client *Client) Start() {
 	var i int = 0
 	for i = 0; i < maxRetries; i++ {
 		port := basePort + i
-		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
+		listener, err = net.Listen("tcp4", fmt.Sprintf(":%d", port))
 		if err == nil {
 			// Successfully bound to a port
-			fmt.Printf("Server is listening on port %d\n", port)
 			break
 		}
 		fmt.Printf("Failed to bind to port %d: %s. Trying next port...\n", port, err)
 		time.Sleep(time.Second)
 	}
 	if err != nil {
-		fmt.Println("Error staring server", err.Error())
-		return
+
+		return fmt.Errorf("Error staring server %v", err.Error())
 	}
 
 	addr := listener.Addr().(*net.TCPAddr)
 
 	client.listener = listener
 	client.Port = strconv.Itoa(addr.Port)
-	client.IP = "127.0.0.1"
+	client.IP = addr.IP.String()
 	client.ID = cuid2.Generate()
-	client.AddToServer()
+	err = client.AddToServer()
+	if err != nil {
+		return err
+	}
 	client.ReqFileChan = make(chan string)
 	if client.Directory == "" {
-		client.Directory = "/home/anurag/projects/dfs/client" + fmt.Sprintf("%d", i) + "/"
-	}
+		currentDir, err := os.Getwd()
+		if err != nil {
 
+			return fmt.Errorf("failed to get current directory: %v", err)
+		}
+
+		client.Directory = filepath.Join(currentDir, fmt.Sprintf("client%d", i)) + "/"
+		// fmt.Println(client.Directory, "CLINET DIRECTORYYYY")
+	}
+	// fmt.Println(string(addr.IP), "ADDR")
 	err = os.MkdirAll(client.Directory, 0755)
 	if err != nil {
-		fmt.Printf("Error creating directory: %v\n", err)
-		return
+		return fmt.Errorf("error creating directory: %v ", err)
+
 	}
 
 	go client.startReqFileLoop()
 	go client.startAcceptingConn()
-
+	fmt.Printf("Server is listening on %s:%s\n", client.IP, client.Port)
+	return nil
 }
 func (client *Client) startAcceptingConn() {
 	for {
@@ -100,18 +110,16 @@ func (client *Client) startAcceptingConn() {
 }
 
 func (client *Client) startReqFileLoop() {
-	fmt.Println("STARTING REQ LOOP")
+	// fmt.Println("STARTING REQ LOOP")
 	for msg := range client.ReqFileChan {
 
 		args := strings.Split(string(msg), ":")
 		senderIP := args[0]
 		senderPort := args[1]
 		fileId := args[2]
-		fmt.Println("WANT TO GET THIS FILE", fileId)
-
-		senderConn, err := net.Dial("tcp", senderIP+":"+senderPort)
+		senderConn, err := net.Dial("tcp4", senderIP+":"+senderPort)
 		if err != nil {
-			fmt.Println("REQ FILE ERROR", err.Error())
+			// fmt.Println("REQ FILE ERROR", err.Error())
 			return
 		}
 		binary.Write(senderConn, binary.BigEndian, global.PULL_FILE)
@@ -132,14 +140,14 @@ func (client *Client) handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	binary.Read(reader, binary.LittleEndian, &requestType)
-	fmt.Println(requestType, "REQ_t")
+	// fmt.Println(requestType, "REQ_t")
 	switch requestType {
-	case GET_FILE:
+	case global.GET_FILE:
 		client.getFile(reader, conn)
 	case global.PULL_FILE:
 		client.pullFile(reader, conn)
-	case global.REQUEST_FILE:
-		client.RequestFile(reader, conn)
+	case global.REQUEST_TO_PULL_FILE:
+		client.RequestToPullFile(reader, conn)
 	case global.DOWNLOAD_FILE:
 		protocol.SendFile(reader, conn, global.Client{
 			ClientId:  client.ID,
@@ -147,13 +155,30 @@ func (client *Client) handleConnection(conn net.Conn) {
 			Port:      client.Port,
 			Directory: client.Directory,
 		})
+
+	case global.SENDER_HANDSHAKE:
+		client.senderHandShake(reader, conn)
+
+	case global.RECEIVER_HANDSHAKE:
+		client.receiverHandShake(reader, conn)
+
 	}
 
 }
 
-func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
+func (client *Client) senderHandShake(reader *bufio.Reader, conn net.Conn) {
 
-	totalLen := 0
+	binary.Write(conn, binary.BigEndian, uint8(1))
+
+}
+func (client *Client) receiverHandShake(reader *bufio.Reader, conn net.Conn) {
+
+	binary.Write(conn, binary.BigEndian, uint8(1))
+
+}
+
+func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
+	// fmt.Println("WE SENDIN FILE BOYZZZZ")
 	var chunkNo = 0
 	var fileIdLen uint16
 	err := binary.Read(reader, binary.BigEndian, &fileIdLen)
@@ -164,52 +189,53 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 	fileIdBuf := make([]byte, fileIdLen)
 	_, err = reader.Read(fileIdBuf)
 	if err != nil {
-		fmt.Println("Error in reading file name", err.Error())
-
 		return
 	}
 
 	fileId := string(fileIdBuf)
-
+	totalBytes := 0
+	file, err := os.OpenFile(client.Directory+fileId, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println("ERORR", err)
+		return
+	}
 	for {
 		chunk := make([]byte, global.CHUNK_SIZE)
-		n, err := reader.Read(chunk)
+		noOfBytes := uint16(0)
+		binary.Read(conn, binary.BigEndian, &noOfBytes)
+
+		_, err := reader.Read(chunk)
 
 		if err != nil {
 
 			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
 			if err == io.EOF {
-				fmt.Println("WE FUCKING EOF")
-
+				break
 			} else {
 				fmt.Println("WE FUCKING RETURNING BOYS")
 				// return
 			}
 		}
-
-		fmt.Println("chunkNo", chunkNo, "number of bytes", n)
+		chunk = chunk[:noOfBytes]
+		totalBytes += len(chunk)
+		// fmt.Println("chunkNo", chunkNo, "number of bytes", n)
 		chunkNo++
-		data := chunk
 
-		// fmt.Println("RECIVED FILENAME",filename,"CHUNK",chunk)
-
-		client.handleFileChunk(fileId, data)
-		totalLen += n
+		client.handleFileChunk(file, chunk)
+		// totalLen += n
 		ackBuf := []byte{1}
 		conn.Write(ackBuf)
-		if err != nil {
-			fmt.Println("Error reading from connection:", err)
-			fmt.Println("totalLen", totalLen)
+		if err == io.EOF {
+			// fmt.Println("Error reading from connection:", err)
+			// fmt.Println("totalLen", totalLen)
 			// if err == io.EOF {
 			// 	break // End of the message
 			// }
 			break
 		}
-		fmt.Println("WE NOT EXITING BOYS IG")
-
 	}
-	fmt.Println("WE COMPLETED DOWNLOADING NOW WE UPDATE ON MASTER")
-	masterConn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
+	// fmt.Println("WE COMPLETED DOWNLOADING NOW WE UPDATE ON MASTER")
+	masterConn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("ERROR OCCURENT WHIL COMNECTING TO MASTER SERVER")
 		return
@@ -217,7 +243,7 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 
 	binary.Write(masterConn, binary.BigEndian, global.ADD_SENDER_TO_FILE_STORE)
 	res := fileId + ":" + client.ID
-	fmt.Println(res, "REAASSSS")
+	// fmt.Println(res, "REAASSSS")
 	masterConn.Write([]byte(res))
 	masterConn.Close()
 
@@ -231,7 +257,7 @@ func (client *Client) pullFile(reader *bufio.Reader, conn net.Conn) {
 		fmt.Println("PULL FILE DAYUM", err.Error())
 		return
 	}
-	fmt.Println(fileIdLen, "LEEENENENENE")
+	// fmt.Println(fileIdLen, "LEEENENENENE")
 	var fileId string
 	fileidBuf := make([]byte, fileIdLen)
 
@@ -242,65 +268,54 @@ func (client *Client) pullFile(reader *bufio.Reader, conn net.Conn) {
 		return
 	}
 	fileId = string(fileidBuf)
-	fmt.Println("ZQUU", client.Directory+fileId)
-
 	file, err := os.OpenFile(client.Directory+fileId, os.O_RDONLY, 0)
 	if err != nil {
 		fmt.Println("PULL FILE ERROR", err.Error())
 		return
 	}
-	fmt.Println("SENDING::::")
+	// fmt.Println("SENDING::::")
 	protocol.UploadToClient(file, conn)
 
 	defer file.Close()
 
 }
 
-func (clinet *Client) RequestFile(reader *bufio.Reader, conn net.Conn) {
+func (clinet *Client) RequestToPullFile(reader *bufio.Reader, conn net.Conn) {
 	//
 
-	// bro send file
+	// Please send the file
+	// fmt.Println("RECEIVED A REQ TO PULL FiLE")
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		fmt.Println("REQ FILE ERROR", err.Error())
 		return
 	}
 	go func() {
-		fmt.Println("BRO : SEND FILE", string(body))
 		clinet.ReqFileChan <- string(body)
-		fmt.Println("TASKEDDE")
 	}()
 
 	conn.Close()
 
 }
 
-func (client *Client) handleFileChunk(filename string, chunk []byte) {
+func (client *Client) handleFileChunk(file *os.File, chunk []byte) {
 
-	file, err := os.OpenFile(client.Directory+filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	_, err := file.Write(chunk)
 	if err != nil {
-		fmt.Println("failed to create file", err.Error())
-		return
-	}
-	defer file.Close()
-	_, err = file.Write(chunk)
-	if err != nil {
-		fmt.Println("failed to write chunk to file:", err.Error())
-
 		return
 	}
 
 }
-func (client *Client) AddToServer() {
+func (client *Client) AddToServer() error {
 
-	fmt.Println("writing", global.MASTER_SERVER_URL)
+	// fmt.Println("writing", global.MASTER_SERVER_URL)
 	content := fmt.Sprintf("%s:%s:%s:%s \n", client.ID, client.IP, client.Port, client.Directory)
 
-	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
 
 	if err != nil {
-		fmt.Println("ERROR WHILE SENDING A REQUEST", err.Error())
-		return
+		return fmt.Errorf("ERROR WHILE SENDING A REQUEST", err.Error())
+
 	}
 
 	binary.Write(conn, binary.BigEndian, global.ADD_CLIENT)
@@ -310,38 +325,45 @@ func (client *Client) AddToServer() {
 	err = conn.Close()
 
 	if err != nil {
-		fmt.Println("ERROR WHILE CLosing A REQUEST", err.Error())
-		return
+		return fmt.Errorf("error WHILE CLosing A REQUEST", err.Error())
+
 	}
 
+	return nil
+
 }
-func (client *Client) UploadFile(filePath string) {
+func (client *Client) AnnounceFile(filePath string) error {
 	fileId := cuid2.Generate()
 	file, err := os.Open(filePath)
 	ext := strings.ToLower(filepath.Ext(filePath))
 	fileId += ext
 	if err != nil {
-		fmt.Println("ERROR OPENING FILE", err.Error())
+		return fmt.Errorf("error opening file %v", err.Error())
 
 	}
 	destPath := client.Directory + fileId
 
 	destFile, err := os.Create(destPath)
 	if err != nil {
-		fmt.Println("error creating destination file:", err.Error())
-		return
+		return fmt.Errorf("error creating destination file: %v", err.Error())
+
 	}
 
 	_, err = io.Copy(destFile, file)
 	if err != nil {
-		fmt.Println("error copying file:", err.Error())
-		return
-	}
 
-	tracker.CreateTrackerFile(destFile, client.ID, fileId)
-	protocol.AnnounceFile(fileId, file.Name(), client.ID)
+		return fmt.Errorf("error copying file: %v", err.Error())
+	}
+	tracker.CreateTrackerFile(destFile, client.ID, fileId, client.Directory)
+
+	err = protocol.AnnounceFile(fileId, file.Name(), client.ID)
+	if err != nil {
+		return err
+	}
 	defer destFile.Close()
 	defer file.Close()
+
+	return nil
 }
 
 func (client *Client) DownloadFile(trackerFilePath string) {
@@ -381,12 +403,12 @@ func (client *Client) DownloadFile(trackerFilePath string) {
 
 }
 
-func InitalizeClient(directory string) ClientService {
+func InitalizeClient(directory string) (ClientService, error) {
 	var client ClientService = &Client{
 		Directory: directory,
 	}
 
-	client.Start()
+	err := client.Start()
 
-	return client
+	return client, err
 }
