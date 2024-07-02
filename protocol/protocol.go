@@ -7,8 +7,8 @@ import (
 
 	// "encoding/hex"
 	"fmt"
-	"hash"
 	"interfiles/global"
+	"interfiles/tracker"
 
 	"interfiles/verifier"
 
@@ -90,11 +90,12 @@ func AnnounceFile(fileId, filename, clientId string) error {
 	conn.Write([]byte(file_body))
 	defer conn.Close()
 
-	fmt.Println("Your file  is announced to master , you can check the status using \"start\" ")
+	global.SuccessPrint.Println("Your file  is announced to master , you can check the status using \"stat -p path/to/tracker-file \" ")
 	return nil
 }
 
 func UploadToClient(file *os.File, conn net.Conn) {
+	reader := bufio.NewReader(conn)
 	file.Seek(0, 0)
 	totlBytes := 0
 	var chunkNo = 0
@@ -107,30 +108,36 @@ func UploadToClient(file *os.File, conn net.Conn) {
 
 		message := make([]byte, global.CHUNK_SIZE)
 
-		bytesRead, err := file.Read(message)
+		bytesRead, fileErr := file.Read(message)
 		totlBytes += bytesRead
 		// fmt.Println("CONTENT", string(buf), "BYTES READ", bytesRead)
-		if err != nil {
+		if fileErr != nil {
 
 			// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
-			if err == io.EOF {
-
+			if fileErr == io.EOF {
+				break
 			} else {
 				fmt.Println("WE FUCKING RETURNING BOYS")
 				return
 			}
 		}
 
-		// fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", len(message))
+		// fmt.Println("ChunkNo", chunkNo, "filenamelen", lenOfFilename, "Sending no of bytes", uint32(bytesRead))
 		chunkNo++
-		binary.Write(conn, binary.BigEndian, uint16(bytesRead))
+		var a uint32 = uint32(bytesRead)
+		binary.Write(conn, binary.BigEndian, a)
 
 		conn.Write(message)
 
 		ackBuf := make([]byte, 1)
-		conn.Read(ackBuf)
+		_, err := reader.Read(ackBuf)
+		if err != nil {
+			fmt.Println("ERR", err)
+			continue
+		}
+		// fmt.Println("ack len", n)
 
-		if err == io.EOF {
+		if fileErr == io.EOF {
 			//eof
 
 			break
@@ -202,7 +209,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 	// fmt.Println("REQUESTING FIlE")
 	//finding potential senders to get the file
 	for _, sender := range file.Clients {
-		fmt.Println("THIS DUDE IS POTENTIAL sender", sender.GetUrl())
+		// fmt.Println("THIS DUDE IS POTENTIAL sender", sender.GetUrl())
 		// protocol.HandShake(receiver,sender)
 
 		conn, err := net.Dial("tcp4", receiver.GetUrl())
@@ -219,7 +226,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 		}
 
 		binary.Write(conn, binary.BigEndian, global.REQUEST_TO_PULL_FILE)
-		fmt.Println(sender.GetUrl()+":"+file.ID, sender.Ip, "YOO asd")
+		// fmt.Println(sender.GetUrl()+":"+file.ID, sender.Ip, "YOO asd")
 		conn.Write([]byte(sender.GetUrl() + ":" + file.ID))
 
 		conn.Close()
@@ -254,7 +261,7 @@ func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 	fmt.Println(string(body), "GET SENDERS FROM MASTER")
 	data := strings.Split(string(body), ":")
 	if len(data) < 3 {
-		fmt.Println("CONTAINS LESS ELEMENTS ")
+		return nil, fmt.Errorf("CONTAINS LESS ELEMENTS ")
 	} else {
 
 		for i := 0; i < len(data); i += 3 {
@@ -282,11 +289,15 @@ func DownloadFile(receiver global.Client, fileId string, clients []global.Client
 		return
 	}
 	var chunksWanted []string = nil
+	metadata, err := tracker.GetMetadata(trackerFile)
+	if err != nil {
+		global.ErrorPrint.Println("ERROR WHILE PARSING METADATA:", err.Error())
+	}
 	for _, client := range clients {
 		HandShake(receiver, client)
-		chunksWanted, err = downloadFileFromClient(client, file, chunksWanted, trackerFile, fileId)
+		chunksWanted, err = downloadFileFromClient(client, file, chunksWanted, trackerFile, fileId, metadata)
 		if err == nil {
-			fmt.Println("DOWNLOADED FILE FROM ", client.GetUrl())
+			global.SuccessPrint.Println("DOWNLOADED FILE FROM ", client.GetUrl())
 			break
 		} else if err != nil {
 			continue
@@ -302,9 +313,8 @@ func DownloadFile(receiver global.Client, fileId string, clients []global.Client
 
 }
 
-func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []string, trackerFile *os.File, fileId string) ([]string, error) {
+func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []string, trackerFile *os.File, fileId string, metadata *global.TrackerFileMetadata) ([]string, error) {
 	//receiving side
-	hasher := sha512.New()
 	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER", sender.GetUrl())
 	conn, err := net.Dial("tcp4", sender.GetUrl())
 	if err != nil {
@@ -313,7 +323,6 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 
 	binary.Write(conn, binary.BigEndian, global.DOWNLOAD_FILE)
 	fileIdLen := uint16(len(fileId))
-	fmt.Println("file id len", fileIdLen)
 	binary.Write(conn, binary.BigEndian, fileIdLen)
 	conn.Write([]byte(fileId))
 	if chunksWanted == nil {
@@ -331,9 +340,9 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 
 	for {
 		buf := make([]byte, global.CHUNK_SIZE+8)
-		var noOfBytes uint16
+		var noOfBytes uint32
 		binary.Read(reader, binary.BigEndian, &noOfBytes)
-		bytesRead, buferr := reader.Read(buf)
+		bytesRead, buferr := io.ReadFull(reader, buf)
 
 		if buferr != nil {
 			if buferr == io.EOF {
@@ -349,11 +358,12 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 		}
 		// fmt.Println(noOfBytes, "AADSDSD")
 		chunkNo := binary.BigEndian.Uint64(buf)
+		fmt.Printf("\rDownloading chunk %d out of %d ", chunkNo+1, metadata.TotalChunks)
 		// fmt.Println("CHUBKNO", chunkNo)
-
+		
 		data := buf[8 : 8+noOfBytes]
 		// fmt.Println("STRING DATA RECEIVED : ", string(buf))
-		err = writeChunkToFile(chunkNo, data, file, trackerFile, hasher)
+		err = writeChunkToFile(chunkNo, data, file)
 		if err != nil {
 			fmt.Println("ALRIGHT BOYZ WE DONE ", err.Error())
 			break
@@ -381,7 +391,7 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 
 }
 
-func writeChunkToFile(chunkno uint64, chunk []byte, file *os.File, trackerFile *os.File, hasher hash.Hash) error {
+func writeChunkToFile(chunkno uint64, chunk []byte, file *os.File) error {
 
 	file.Seek(int64(chunkno)*int64(global.CHUNK_SIZE), 0)
 	file.Write(chunk)
@@ -433,7 +443,7 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 			buf := make([]byte, global.CHUNK_SIZE+8)
 			binary.BigEndian.PutUint64(buf, uint64(chunkNumber))
-			_, err = filetoSend.ReadAt(buf[8:], int64(global.CHUNK_SIZE*chunkNumber))
+			_, err = filetoSend.ReadAt(buf[8:], int64(chunkNumber)*int64(global.CHUNK_SIZE))
 
 			if err != nil {
 
@@ -483,7 +493,7 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 				}
 			}
 
-			binary.Write(conn, binary.BigEndian, uint16(bytesRead))
+			binary.Write(conn, binary.BigEndian, uint32(bytesRead))
 			hasher := sha512.New()
 			hasher.Write(message[8 : 8+bytesRead])
 

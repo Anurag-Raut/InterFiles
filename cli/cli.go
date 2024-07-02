@@ -5,14 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"interfiles/client"
+	"interfiles/global"
 	"interfiles/master"
 	"os"
 	"strings"
-
-	"github.com/fatih/color"
 )
 
-var errorPrint = color.New(color.FgWhite, color.BgRed).Add(color.Bold)
 
 func StartCli() {
 
@@ -49,7 +47,7 @@ func StartCli() {
 			directory := handleDirectoryOperation(command, args[1:])
 			clientObj, err := client.InitalizeClient(directory)
 			if err != nil {
-				errorPrint.Print(err)
+				global.ErrorPrint.Print(err)
 				fmt.Println("")
 				return
 			}
@@ -59,6 +57,8 @@ func StartCli() {
 			fmt.Println("starting master server ")
 			master.InitalizeMaster()
 			// fmt.Println(master)
+
+
 
 		case "help":
 			fmt.Println("Available commands:")
@@ -102,8 +102,7 @@ func StartClientCli(c client.ClientService) {
 			if isValidFilePath(filepath) {
 				err := c.AnnounceFile(filepath)
 				if err != nil {
-					errorPrint.Print(err)
-					fmt.Println("")
+					global.ErrorPrint.Println(err)
 					return
 				}
 
@@ -113,6 +112,13 @@ func StartClientCli(c client.ClientService) {
 			filepath := handleFileOperation(command, args[1:])
 			if isValidFilePath(filepath) {
 				c.DownloadFile(filepath)
+
+			}
+
+		case "stat":
+			filepath := handleFileOperation(command, args[1:])
+			if isValidFilePath(filepath) {
+				c.GetStats(filepath)
 
 			}
 

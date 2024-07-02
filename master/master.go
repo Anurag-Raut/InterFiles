@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,8 +20,9 @@ type MasterService interface {
 	Start()
 	startAcceptingConn()
 	handleConnection(conn net.Conn)
-	addClient(reader *bufio.Reader)
+	addClient(reader *bufio.Reader,conn net.Conn)
 	announceFile(reader *bufio.Reader)
+	ReplicationLoop()
 }
 
 type Master struct {
@@ -38,8 +40,42 @@ func getRoot(w http.ResponseWriter, r *http.Request) {
 	writer.Flush()
 
 }
+func cron(task func()) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
-var replicationFactor = 3
+	for {
+		select {
+		case <-ticker.C:
+			task()
+		}
+	}
+}
+
+func (master *Master) ReplicationLoop() {
+	fmt.Println("STARTED BACKGROUND REPLICATION")
+	for _, file := range master.fileStore {
+		if len(file.Clients) < replicationFactor {
+			for _, client := range master.clientStore {
+				if !slices.Contains(file.Clients, *client) {
+					if len(file.Clients) >= replicationFactor {
+						fmt.Println("LEN FILE CLIENT", len(file.Clients))
+						break
+					}
+
+					// fmt.Println("clientttt", *client, client.GetUrl())
+					protocol.RequestToPullFile(*client, *file)
+
+				}
+
+			}
+
+		}
+	}
+
+}
+
+var replicationFactor = 4
 
 func (master *Master) Start() {
 
@@ -104,7 +140,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 
 	switch requestType {
 	case global.ADD_CLIENT:
-		master.addClient(reader)
+		master.addClient(reader,conn)
 
 	case global.ANNOUNCE:
 		// fmt.Println("BROTHER WE GOOD")
@@ -114,8 +150,33 @@ func (master *Master) handleConnection(conn net.Conn) {
 		master.GetSendersForFile(reader, conn)
 	case global.ADD_SENDER_TO_FILE_STORE:
 		master.addFile(reader)
+	case global.GET_STATS:
+		// fmt.Println("HEYYYY")
+		master.GetStats(reader, conn)
 
 	}
+
+}
+
+func (master *Master) GetStats(reader *bufio.Reader, conn net.Conn) {
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		fmt.Println("Error while sending data", err)
+		return
+	}
+	fileId := string(body)
+	// fmt.Println("FILEID", fileId)
+
+	if file, exists := master.fileStore[fileId]; exists {
+		binary.Write(conn, binary.BigEndian, exists)
+		res := len(file.Clients)
+		binary.Write(conn, binary.BigEndian, uint16(res))
+
+	} else {
+		binary.Write(conn, binary.BigEndian, exists)
+	}
+
+	defer conn.Close()
 
 }
 
@@ -143,7 +204,7 @@ func (master *Master) addFile(reader *bufio.Reader) {
 
 }
 
-func (master *Master) addClient(reader *bufio.Reader) {
+func (master *Master) addClient(reader *bufio.Reader,conn net.Conn) {
 	// fmt.Println("LESS FUCKING GOOOO")
 	body, err := io.ReadAll(reader)
 	if err != nil {
@@ -153,6 +214,11 @@ func (master *Master) addClient(reader *bufio.Reader) {
 	clientData := string(body)
 	args := strings.Split(clientData, ":")
 	// fmt.Println(args[2], "PORTTOOOO")
+
+	
+
+	fmt.Printf("RECEIVED CONNECTION FROM - %s:%s",args[1],args[2])
+
 	newClient := global.Client{
 		ClientId:  args[0],
 		Ip:        args[1],
@@ -165,7 +231,7 @@ func (master *Master) addClient(reader *bufio.Reader) {
 }
 
 func (master *Master) announceFile(reader *bufio.Reader) {
-	fmt.Println("YOOOO")
+	// fmt.Println("YOOOO")
 	//finding relevant clients
 	body, err := io.ReadAll(reader)
 
@@ -183,6 +249,8 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 		Clients: []global.Client{*master.clientStore[senderClientId]},
 	}
 
+	master.fileStore[fileId] = &file
+
 	for receiverClientId, client := range master.clientStore {
 		if len(file.Clients) >= replicationFactor {
 			fmt.Println("LEN FILE CLIENT", len(file.Clients))
@@ -191,7 +259,7 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 		if receiverClientId == senderClientId {
 			continue
 		}
-		fmt.Println("clientttt", *client, client.GetUrl())
+		// fmt.Println("clientttt", *client, client.GetUrl())
 		protocol.RequestToPullFile(*client, file)
 
 	}
@@ -236,6 +304,7 @@ func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
 func InitalizeMaster() {
 	var master MasterService = &Master{}
 
+	go cron(master.ReplicationLoop)
 	master.Start()
 
 	// return master

@@ -5,11 +5,9 @@ package main
 
 import (
 	"interfiles/cli"
-	
 )
 
 func main() {
-
 
 	cli.StartCli()
 

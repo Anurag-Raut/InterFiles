@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"bufio"
 	"crypto/sha512"
 	"fmt"
 	"interfiles/global"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,22 +24,29 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string, director
 	}
 	filename := filepath.Base(ogFile.Name())
 
-	file, err := os.Create(filepath.Join(currentDir, fmt.Sprintf("tracker_files/%s_tracker.txt", fileId)))
+	dirPath := filepath.Join(currentDir, "tracker_files")
+	err = os.MkdirAll(dirPath, 0755)
 	if err != nil {
-		fmt.Println("Error creatinf file", err.Error())
 		return
 	}
 
-	date := time.Now().String()
-	fileInfo, err := file.Stat()
+	filePath := filepath.Join(dirPath, fmt.Sprintf("%s_tracker.txt", fileId))
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return
+	}
+
+	date := time.Now().Format("02-01-2006 150405")
+	fileInfo, err := ogFile.Stat()
+	fmt.Println(fileInfo.Size(), "FILE SIZEEE ")
 	if err != nil {
 		fmt.Println("Error getting file size value", err.Error())
 		return
 	}
-
+	totalChunks := (fileInfo.Size() / int64(global.CHUNK_SIZE)) + 1
 	file.WriteString(fileId)
 	file.WriteString("\n")
-	file.WriteString(fmt.Sprintf("%s:%s:%d:%s", filename, date, fileInfo.Size(), clientId))
+	file.WriteString(fmt.Sprintf("%s:%s:%d:%d:%s", filename, date, fileInfo.Size(), totalChunks, clientId))
 	file.WriteString("\n")
 
 	//chunks
@@ -80,9 +89,55 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string, director
 
 		if lenOfChunk < uint64(global.CHUNK_SIZE) {
 
-			fmt.Printf("Tracker file %s created in directory : %s \n", fileId+"_tracker.txt", directory)
+			global.SuccessPrint.Printf("Tracker file %s created in directory : %s \n", fileId+"_tracker.txt", directory)
 			break
 		}
+
+	}
+
+}
+
+func GetMetadata(trackerFile *os.File) (*global.TrackerFileMetadata, error) {
+	trackerFile.Seek(0, 0)
+	trackerScanner := bufio.NewScanner(trackerFile)
+
+	for i := 0; i < 1; i++ {
+		if !trackerScanner.Scan() {
+			if trackerScanner.Err() != nil {
+				return nil, trackerScanner.Err()
+			}
+			return nil, fmt.Errorf("file has fewer than %d lines", i)
+		} else {
+			trackerScanner.Text()
+		}
+	}
+
+	if !trackerScanner.Scan() {
+		if trackerScanner.Err() != nil {
+			return nil, trackerScanner.Err()
+		}
+		return nil, fmt.Errorf("file has fewer than %d lines", 2)
+	} else {
+		line := trackerScanner.Text()
+		args := strings.Split(line, ":")
+		var metadata global.TrackerFileMetadata
+		metadata.Filename = args[0]
+		metadata.Date = args[1]
+		fmt.Println(args[2], "ARGS SIZE")
+		size, err := strconv.Atoi(args[2])
+		if err != nil {
+			return nil, err
+		}
+		metadata.Size = size
+		fmt.Println(args[3], "ARGS total chunks")
+
+		totalChunks, err := strconv.Atoi(args[3])
+		if err != nil {
+			return nil, err
+		}
+		metadata.TotalChunks = totalChunks
+		metadata.ClientId = args[4]
+		return &metadata, nil
 
 	}
 

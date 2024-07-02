@@ -29,6 +29,7 @@ type ClientService interface {
 	handleFileChunk(file *os.File, chunk []byte)
 	startReqFileLoop()
 	DownloadFile(trackerFilePath string)
+	GetStats(trackerFilePath string)
 }
 
 type Client struct {
@@ -39,10 +40,6 @@ type Client struct {
 	Directory   string
 	ReqFileChan chan string
 }
-
-const (
-	GET_FILE = iota
-)
 
 func (client *Client) Start() error {
 	basePort := 8080
@@ -95,9 +92,11 @@ func (client *Client) Start() error {
 
 	go client.startReqFileLoop()
 	go client.startAcceptingConn()
-	fmt.Printf("Server is listening on %s:%s\n", client.IP, client.Port)
+	global.SuccessPrint.Printf("Server is listening on %s:%s\n", client.IP, client.Port)
 	return nil
 }
+
+
 func (client *Client) startAcceptingConn() {
 	for {
 		conn, err := client.listener.Accept()
@@ -127,9 +126,7 @@ func (client *Client) startReqFileLoop() {
 		senderConn.Write([]byte(fileId))
 		// senderConn.Write([]byte{'\x00'})
 
-		reader := bufio.NewReader(senderConn)
-
-		client.getFile(reader, senderConn)
+		client.getFile(senderConn)
 
 	}
 }
@@ -143,7 +140,7 @@ func (client *Client) handleConnection(conn net.Conn) {
 	// fmt.Println(requestType, "REQ_t")
 	switch requestType {
 	case global.GET_FILE:
-		client.getFile(reader, conn)
+		client.getFile(conn)
 	case global.PULL_FILE:
 		client.pullFile(reader, conn)
 	case global.REQUEST_TO_PULL_FILE:
@@ -177,7 +174,8 @@ func (client *Client) receiverHandShake(reader *bufio.Reader, conn net.Conn) {
 
 }
 
-func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
+func (client *Client) getFile(conn net.Conn) {
+	reader := bufio.NewReader(conn)
 	// fmt.Println("WE SENDIN FILE BOYZZZZ")
 	var chunkNo = 0
 	var fileIdLen uint16
@@ -201,31 +199,35 @@ func (client *Client) getFile(reader *bufio.Reader, conn net.Conn) {
 	}
 	for {
 		chunk := make([]byte, global.CHUNK_SIZE)
-		noOfBytes := uint16(0)
-		binary.Read(conn, binary.BigEndian, &noOfBytes)
-
-		_, err := reader.Read(chunk)
-
+		noOfBytes := uint32(0)
+		err := binary.Read(conn, binary.BigEndian, &noOfBytes)
 		if err != nil {
+			// fmt.Println("ERRUR:", err.Error())
+			break
+		}
+		_, chunkErr := io.ReadFull(reader, chunk)
+		// fmt.Println(noOfBytes, "NO OF BYTES", kitneReadKiye)
+		if chunkErr != nil {
 
-			fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
-			if err == io.EOF {
-				break
+			// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
+			if chunkErr == io.EOF {
+
 			} else {
-				fmt.Println("WE FUCKING RETURNING BOYS")
+				global.ErrorPrint.Println("Error occured while pull file:", err.Error())
 				// return
 			}
 		}
+
+		// fmt.Println("number of bytes", len(chunk))
 		chunk = chunk[:noOfBytes]
 		totalBytes += len(chunk)
-		// fmt.Println("chunkNo", chunkNo, "number of bytes", n)
 		chunkNo++
 
 		client.handleFileChunk(file, chunk)
 		// totalLen += n
 		ackBuf := []byte{1}
 		conn.Write(ackBuf)
-		if err == io.EOF {
+		if chunkErr == io.EOF {
 			// fmt.Println("Error reading from connection:", err)
 			// fmt.Println("totalLen", totalLen)
 			// if err == io.EOF {
@@ -400,6 +402,48 @@ func (client *Client) DownloadFile(trackerFilePath string) {
 		Port:      client.Port,
 		Directory: client.Directory,
 	}, fileId, potentialSender, trackerFile)
+
+}
+
+func (client *Client) GetStats(trackerFilePath string) {
+	trackerFile, err := os.Open(trackerFilePath)
+	if err != nil {
+		fmt.Println("Error opening tracker file")
+		return
+	}
+
+	scanner := bufio.NewScanner(trackerFile)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			fmt.Println("error reading tracker file: %w", err)
+			return
+		}
+		fmt.Println("tracker file is empty")
+		return
+	}
+	fileId := scanner.Text()
+
+	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	if err != nil {
+		fmt.Println("Error while reading ", err)
+		return
+	}
+	fmt.Println("FILE ID ON SENDER", fileId)
+	binary.Write(conn, binary.BigEndian, global.GET_STATS)
+	conn.Write([]byte(fileId))
+	conn.(*net.TCPConn).CloseWrite()
+
+	var exists bool
+	var noOfClients uint16
+	binary.Read(conn, binary.BigEndian, &exists)
+
+	if exists {
+		binary.Read(conn, binary.BigEndian, &noOfClients)
+		global.SuccessPrint.Println("NO OF CLIENTS THAT HAS THIS FILE : ", noOfClients)
+
+	} else {
+		global.ErrorPrint.Println("FILE DOESN'T EXISTS, TRY AGAIN ")
+	}
 
 }
 

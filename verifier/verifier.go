@@ -92,7 +92,7 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		}
 		hasher.Reset()
 
-		if bytesReaded < global.CHUNK_SIZE  || bufError==io.EOF{
+		if bytesReaded < int(global.CHUNK_SIZE)  || bufError==io.EOF{
 
 			break
 		}
