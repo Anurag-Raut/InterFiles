@@ -37,7 +37,7 @@ type TrackerFileMetadata struct {
 }
 
 func (c *Client) GetUrl() string {
-	return c.Ip + ":" + c.Port
+	return   c.Ip + ":" + c.Port
 }
 
 type File struct {

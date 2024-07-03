@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"interfiles/global"
 	"interfiles/protocol"
+	"interfiles/stun"
 	"interfiles/tracker"
 	"io"
 	"path/filepath"
@@ -49,7 +50,7 @@ func (client *Client) Start() error {
 	var i int = 0
 	for i = 0; i < maxRetries; i++ {
 		port := basePort + i
-		listener, err = net.Listen("tcp4", fmt.Sprintf(":%d", port))
+		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
 			// Successfully bound to a port
 			break
@@ -65,8 +66,13 @@ func (client *Client) Start() error {
 	addr := listener.Addr().(*net.TCPAddr)
 
 	client.listener = listener
+	IP, err := stun.GetAddressFromStun()
+	if err != nil {
+		return err
+	}
+
 	client.Port = strconv.Itoa(addr.Port)
-	client.IP = addr.IP.String()
+	client.IP = "[" + IP + "]"
 	client.ID = cuid2.Generate()
 	err = client.AddToServer()
 	if err != nil {
@@ -96,7 +102,6 @@ func (client *Client) Start() error {
 	return nil
 }
 
-
 func (client *Client) startAcceptingConn() {
 	for {
 		conn, err := client.listener.Accept()
@@ -111,12 +116,11 @@ func (client *Client) startAcceptingConn() {
 func (client *Client) startReqFileLoop() {
 	// fmt.Println("STARTING REQ LOOP")
 	for msg := range client.ReqFileChan {
-
-		args := strings.Split(string(msg), ":")
+		args := strings.Split(string(msg), "::")
 		senderIP := args[0]
 		senderPort := args[1]
 		fileId := args[2]
-		senderConn, err := net.Dial("tcp4", senderIP+":"+senderPort)
+		senderConn, err := net.Dial("tcp", senderIP+":"+senderPort)
 		if err != nil {
 			// fmt.Println("REQ FILE ERROR", err.Error())
 			return
@@ -237,14 +241,14 @@ func (client *Client) getFile(conn net.Conn) {
 		}
 	}
 	// fmt.Println("WE COMPLETED DOWNLOADING NOW WE UPDATE ON MASTER")
-	masterConn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	masterConn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("ERROR OCCURENT WHIL COMNECTING TO MASTER SERVER")
 		return
 	}
 
 	binary.Write(masterConn, binary.BigEndian, global.ADD_SENDER_TO_FILE_STORE)
-	res := fileId + ":" + client.ID
+	res := fileId + "::" + client.ID
 	// fmt.Println(res, "REAASSSS")
 	masterConn.Write([]byte(res))
 	masterConn.Close()
@@ -311,9 +315,9 @@ func (client *Client) handleFileChunk(file *os.File, chunk []byte) {
 func (client *Client) AddToServer() error {
 
 	// fmt.Println("writing", global.MASTER_SERVER_URL)
-	content := fmt.Sprintf("%s:%s:%s:%s \n", client.ID, client.IP, client.Port, client.Directory)
+	content := fmt.Sprintf("%s::%s::%s::%s \n", client.ID, client.IP, client.Port, client.Directory)
 
-	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 
 	if err != nil {
 		return fmt.Errorf("ERROR WHILE SENDING A REQUEST", err.Error())
@@ -423,7 +427,7 @@ func (client *Client) GetStats(trackerFilePath string) {
 	}
 	fileId := scanner.Text()
 
-	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("Error while reading ", err)
 		return

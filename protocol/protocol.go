@@ -50,7 +50,7 @@ func handleConnection(conn net.Conn) {
 
 func SendMessage(message string) {
 	// Connect to the server
-	conn, err := net.Dial("tcp4", ":8080")
+	conn, err := net.Dial("tcp", ":8080")
 	if err != nil {
 		fmt.Println("Failed to connect to the server:", err)
 		return
@@ -81,12 +81,12 @@ func SendMessage(message string) {
 
 func AnnounceFile(fileId, filename, clientId string) error {
 
-	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to the server: %v", err)
 	}
 	binary.Write(conn, binary.BigEndian, global.ANNOUNCE)
-	file_body := clientId + ":" + fileId + ":" + filename
+	file_body := clientId + "::" + fileId + "::" + filename
 	conn.Write([]byte(file_body))
 	defer conn.Close()
 
@@ -152,7 +152,7 @@ func UploadToClient(file *os.File, conn net.Conn) {
 
 func HandShake(receiver, sender global.Client) error {
 	//sender handshake
-	conn, err := net.Dial("tcp4", sender.GetUrl())
+	conn, err := net.Dial("tcp", sender.GetUrl())
 	if err != nil {
 		fmt.Println("Error occured ", err.Error())
 		return err
@@ -171,7 +171,7 @@ func HandShake(receiver, sender global.Client) error {
 
 	conn.Close()
 
-	conn, err = net.Dial("tcp4", receiver.GetUrl())
+	conn, err = net.Dial("tcp", receiver.GetUrl())
 	if err != nil {
 		fmt.Println("Error occured ", err.Error())
 		return err
@@ -199,7 +199,7 @@ func HandShake(receiver, sender global.Client) error {
 // 	// receiver <- sender
 // 	// make connection to sneder and ask for file
 
-// 	conn,err:=net.Dial("tcp4",sender.GetUrl())
+// 	conn,err:=net.Dial("tcp",sender.GetUrl())
 
 // 	binary.Write(conn,binary.LittleEndian,global.SENDER_PULLFILE)
 
@@ -212,7 +212,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 		// fmt.Println("THIS DUDE IS POTENTIAL sender", sender.GetUrl())
 		// protocol.HandShake(receiver,sender)
 
-		conn, err := net.Dial("tcp4", receiver.GetUrl())
+		conn, err := net.Dial("tcp", receiver.GetUrl())
 		if err != nil {
 			fmt.Println("ERROR", err.Error())
 			return
@@ -227,7 +227,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 
 		binary.Write(conn, binary.BigEndian, global.REQUEST_TO_PULL_FILE)
 		// fmt.Println(sender.GetUrl()+":"+file.ID, sender.Ip, "YOO asd")
-		conn.Write([]byte(sender.GetUrl() + ":" + file.ID))
+		conn.Write([]byte(sender.Ip+"::"+sender.Port + "::" + file.ID))
 
 		conn.Close()
 		break
@@ -238,7 +238,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 
 func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 
-	conn, err := net.Dial("tcp4", global.MASTER_SERVER_URL)
+	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("Error getting clients", err.Error())
 		return nil, err
@@ -258,8 +258,8 @@ func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 		return nil, err
 	}
 	var clients []global.Client
-	fmt.Println(string(body), "GET SENDERS FROM MASTER")
-	data := strings.Split(string(body), ":")
+	// fmt.Println(string(body), "GET SENDERS FROM MASTER")
+	data := strings.Split(string(body), "::")
 	if len(data) < 3 {
 		return nil, fmt.Errorf("CONTAINS LESS ELEMENTS ")
 	} else {
@@ -316,7 +316,7 @@ func DownloadFile(receiver global.Client, fileId string, clients []global.Client
 func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []string, trackerFile *os.File, fileId string, metadata *global.TrackerFileMetadata) ([]string, error) {
 	//receiving side
 	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER", sender.GetUrl())
-	conn, err := net.Dial("tcp4", sender.GetUrl())
+	conn, err := net.Dial("tcp", sender.GetUrl())
 	if err != nil {
 		return chunksWanted, err
 	}
@@ -331,7 +331,7 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 
 	} else {
 		binary.Write(conn, binary.BigEndian, uint8(1))
-		chunksFormated := strings.Join(chunksWanted, ":")
+		chunksFormated := strings.Join(chunksWanted, "::")
 		conn.Write([]byte(chunksFormated))
 		conn.Write([]byte{'\x04'})
 	}
@@ -360,7 +360,7 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 		chunkNo := binary.BigEndian.Uint64(buf)
 		fmt.Printf("\rDownloading chunk %d out of %d ", chunkNo+1, metadata.TotalChunks)
 		// fmt.Println("CHUBKNO", chunkNo)
-		
+
 		data := buf[8 : 8+noOfBytes]
 		// fmt.Println("STRING DATA RECEIVED : ", string(buf))
 		err = writeChunkToFile(chunkNo, data, file)
@@ -431,7 +431,7 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 		if err != nil {
 			fmt.Println("errorrorr reding chunss")
 		}
-		chunks := strings.Split(string(bytes), ":")
+		chunks := strings.Split(string(bytes), "::")
 
 		for _, chunkNo := range chunks {
 			chunkNumber, err := strconv.Atoi(chunkNo)

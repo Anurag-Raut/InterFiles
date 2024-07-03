@@ -46,7 +46,7 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string, director
 	totalChunks := (fileInfo.Size() / int64(global.CHUNK_SIZE)) + 1
 	file.WriteString(fileId)
 	file.WriteString("\n")
-	file.WriteString(fmt.Sprintf("%s:%s:%d:%d:%s", filename, date, fileInfo.Size(), totalChunks, clientId))
+	file.WriteString(fmt.Sprintf("%s::%s::%d::%d::%s", filename, date, fileInfo.Size(), totalChunks, clientId))
 	file.WriteString("\n")
 
 	//chunks
@@ -81,7 +81,7 @@ func CreateTrackerFile(ogFile *os.File, clientId string, fileId string, director
 
 		hashString := verifier.HashChunk(hasher, message)
 
-		file.WriteString(strconv.Itoa(chunkNo) + ":" + strconv.Itoa(len(message)) + ":" + hashString)
+		file.WriteString(strconv.Itoa(chunkNo) + "::" + strconv.Itoa(len(message)) + "::" + hashString)
 		file.WriteString("\n")
 
 		hasher.Reset()
@@ -119,7 +119,7 @@ func GetMetadata(trackerFile *os.File) (*global.TrackerFileMetadata, error) {
 		return nil, fmt.Errorf("file has fewer than %d lines", 2)
 	} else {
 		line := trackerScanner.Text()
-		args := strings.Split(line, ":")
+		args := strings.Split(line, "::")
 		var metadata global.TrackerFileMetadata
 		metadata.Filename = args[0]
 		metadata.Date = args[1]

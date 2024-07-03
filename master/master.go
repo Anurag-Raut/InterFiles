@@ -20,7 +20,7 @@ type MasterService interface {
 	Start()
 	startAcceptingConn()
 	handleConnection(conn net.Conn)
-	addClient(reader *bufio.Reader,conn net.Conn)
+	addClient(reader *bufio.Reader, conn net.Conn)
 	announceFile(reader *bufio.Reader)
 	ReplicationLoop()
 }
@@ -41,7 +41,7 @@ func getRoot(w http.ResponseWriter, r *http.Request) {
 
 }
 func cron(task func()) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -53,7 +53,6 @@ func cron(task func()) {
 }
 
 func (master *Master) ReplicationLoop() {
-	fmt.Println("STARTED BACKGROUND REPLICATION")
 	for _, file := range master.fileStore {
 		if len(file.Clients) < replicationFactor {
 			for _, client := range master.clientStore {
@@ -86,7 +85,7 @@ func (master *Master) Start() {
 
 	for i := 0; i < maxRetries; i++ {
 		port := basePort + i
-		listener, err = net.Listen("tcp4", fmt.Sprintf(":%d", port))
+		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
 			// Successfully bound to a port
 			fmt.Printf("Master Server is listening on port %d\n", port)
@@ -140,7 +139,7 @@ func (master *Master) handleConnection(conn net.Conn) {
 
 	switch requestType {
 	case global.ADD_CLIENT:
-		master.addClient(reader,conn)
+		master.addClient(reader, conn)
 
 	case global.ANNOUNCE:
 		// fmt.Println("BROTHER WE GOOD")
@@ -188,7 +187,7 @@ func (master *Master) addFile(reader *bufio.Reader) {
 		fmt.Println("error reading body in addFile")
 		return
 	}
-	args := strings.Split(string(body), ":")
+	args := strings.Split(string(body), "::")
 	fileId := args[0]
 	clientId := args[1]
 
@@ -204,7 +203,7 @@ func (master *Master) addFile(reader *bufio.Reader) {
 
 }
 
-func (master *Master) addClient(reader *bufio.Reader,conn net.Conn) {
+func (master *Master) addClient(reader *bufio.Reader, conn net.Conn) {
 	// fmt.Println("LESS FUCKING GOOOO")
 	body, err := io.ReadAll(reader)
 	if err != nil {
@@ -212,12 +211,10 @@ func (master *Master) addClient(reader *bufio.Reader,conn net.Conn) {
 		return
 	}
 	clientData := string(body)
-	args := strings.Split(clientData, ":")
+	args := strings.Split(clientData, "::")
 	// fmt.Println(args[2], "PORTTOOOO")
 
-	
-
-	fmt.Printf("RECEIVED CONNECTION FROM - %s:%s",args[1],args[2])
+	fmt.Printf("RECEIVED CONNECTION FROM - %s:%s", args[1], args[2])
 
 	newClient := global.Client{
 		ClientId:  args[0],
@@ -241,7 +238,7 @@ func (master *Master) announceFile(reader *bufio.Reader) {
 	}
 	//adding to file store
 	// fmt.Println(string(body), "LESS GOOO")
-	args := strings.Split(string(body), ":")
+	args := strings.Split(string(body), "::")
 	senderClientId := args[0]
 	fileId := args[1]
 	file := global.File{
@@ -285,9 +282,9 @@ func (master *Master) GetSendersForFile(reader *bufio.Reader, conn net.Conn) {
 
 		for index, client := range master.fileStore[fileId].Clients {
 
-			result += client.ClientId + ":" + client.Ip + ":" + client.Port
+			result += client.ClientId + "::" + client.Ip + "::" + client.Port
 			if index != noOfSenders-1 {
-				result += ":"
+				result += "::"
 			}
 		}
 

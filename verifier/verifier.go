@@ -57,7 +57,7 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		}
 
 		line := trackerScanner.Text()
-		trackerLineData := strings.Split(line, ":")
+		trackerLineData := strings.Split(line, "::")
 		trackerChunkno := trackerLineData[0]
 		// chunkSize:=trackerLineData[1]
 		hashHex := trackerLineData[2]
@@ -142,7 +142,7 @@ func VerifyChunk(chunk []byte, chunkno uint64, trackerFile *os.File, hasher hash
 	} else {
 		trackerScanner.Text()
 	}
-	trackerChunkData := strings.Split(trackerScanner.Text(), ":")
+	trackerChunkData := strings.Split(trackerScanner.Text(), "::")
 	trackerchunkNo := trackerChunkData[0]
 	chunkHashHex := trackerChunkData[2]
 	trackerChunkNoInt, err := strconv.Atoi(trackerchunkNo)
