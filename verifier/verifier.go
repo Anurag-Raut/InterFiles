@@ -47,11 +47,13 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		bytesReaded, bufError := file.Read(buf)
 		if bufError != nil  && bufError!= io.EOF{
 			fmt.Println("ERROR", bufError.Error())
-			return false,nil, bufError
+			return false,chunksWanted, bufError
 		}
 
 
 		if !trackerScanner.Scan() {
+			fmt.Println("EasdRROR 2",chunksWanted)
+			file.Truncate(0)
 			return false,nil, fmt.Errorf("error ")
 
 		}
@@ -65,7 +67,9 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		buf = buf[:bytesReaded]
 		hashBytes, err := hex.DecodeString(hashHex)
 		if err != nil {
-			return false,nil, err
+			fmt.Println("ERROR asdasd2")
+
+			return false,chunksWanted, err
 
 		}
 		hasher.Reset()
@@ -73,21 +77,23 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		hash := hasher.Sum(nil)
 		trackerChunknoInt, err := strconv.Atoi(trackerChunkno)
 		if err != nil {
+			fmt.Println("ERROR 2as")
 
-			return false,nil, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
+			return false,chunksWanted, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
 		}
 
 		if trackerChunknoInt != chunkNo {
-			
-			return false,nil, fmt.Errorf("order mismatch trackerChunkNo : %d , actual chunk : %d",trackerChunknoInt,chunkNo)
+			fmt.Println("ERROR 2")
+			return false,chunksWanted, fmt.Errorf("order mismatch trackerChunkNo : %d , actual chunk : %d",trackerChunknoInt,chunkNo)
 
 		}
 		chunkNo++
 
 
 		if !bytes.Equal(hash, hashBytes) {
-			fmt.Println("NOT MATCHING",chunkNo-1,hashHex)
+			fmt.Println("NOT MATCHING",trackerChunkno,"from tracker ",hashHex,"from file ",hex.EncodeToString(hash))
 			chunksWanted=append(chunksWanted, trackerChunkno)
+			fmt.Println("CHUNKS WANTED 1",chunksWanted)
 			continue
 		}
 		hasher.Reset()
@@ -99,6 +105,7 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 
 
 	}
+	fmt.Println("CHUNKS WANTED 2",chunksWanted)
 
 	return true,chunksWanted, nil
 

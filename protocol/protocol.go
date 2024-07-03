@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha512"
 	"encoding/binary"
+	"encoding/hex"
 
 	// "encoding/hex"
 	"fmt"
@@ -227,7 +228,7 @@ func RequestToPullFile(receiver global.Client, file global.File) {
 
 		binary.Write(conn, binary.BigEndian, global.REQUEST_TO_PULL_FILE)
 		// fmt.Println(sender.GetUrl()+":"+file.ID, sender.Ip, "YOO asd")
-		conn.Write([]byte(sender.Ip+"::"+sender.Port + "::" + file.ID))
+		conn.Write([]byte(sender.Ip + "::" + sender.Port + "::" + file.ID))
 
 		conn.Close()
 		break
@@ -283,7 +284,7 @@ func GetSendersFromMaster(fileId string) ([]global.Client, error) {
 }
 
 func DownloadFile(receiver global.Client, fileId string, clients []global.Client, trackerFile *os.File) {
-	file, err := os.OpenFile(receiver.Directory+"newww"+fileId, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
+	file, err := os.OpenFile(receiver.Directory+"newww"+fileId, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		fmt.Println("Error while opening the write file", err.Error())
 		return
@@ -296,7 +297,9 @@ func DownloadFile(receiver global.Client, fileId string, clients []global.Client
 	for _, client := range clients {
 		HandShake(receiver, client)
 		chunksWanted, err = downloadFileFromClient(client, file, chunksWanted, trackerFile, fileId, metadata)
-		if err == nil {
+		if len(chunksWanted) > 0 {
+			continue
+		} else if err == nil {
 			global.SuccessPrint.Println("DOWNLOADED FILE FROM ", client.GetUrl())
 			break
 		} else if err != nil {
@@ -313,9 +316,10 @@ func DownloadFile(receiver global.Client, fileId string, clients []global.Client
 
 }
 
+
 func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []string, trackerFile *os.File, fileId string, metadata *global.TrackerFileMetadata) ([]string, error) {
 	//receiving side
-	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER", sender.GetUrl())
+	fmt.Println("TRYING TO DOWNLOAD FROM A SENDER", sender.GetUrl(), chunksWanted)
 	conn, err := net.Dial("tcp", sender.GetUrl())
 	if err != nil {
 		return chunksWanted, err
@@ -332,8 +336,10 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 	} else {
 		binary.Write(conn, binary.BigEndian, uint8(1))
 		chunksFormated := strings.Join(chunksWanted, "::")
+		fmt.Println("CHUNS WANTED ", chunksFormated)
+		len := uint16(len(chunksFormated))
+		binary.Write(conn, binary.BigEndian, len)
 		conn.Write([]byte(chunksFormated))
-		conn.Write([]byte{'\x04'})
 	}
 
 	reader := bufio.NewReader(conn)
@@ -354,9 +360,10 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 		}
 
 		if noOfBytes == 0 {
+			fmt.Println("ABEEEEE")
 			break
 		}
-		// fmt.Println(noOfBytes, "AADSDSD")
+		fmt.Println(noOfBytes, "AADSDSD")
 		chunkNo := binary.BigEndian.Uint64(buf)
 		fmt.Printf("\rDownloading chunk %d out of %d ", chunkNo+1, metadata.TotalChunks)
 		// fmt.Println("CHUBKNO", chunkNo)
@@ -364,6 +371,7 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 		data := buf[8 : 8+noOfBytes]
 		// fmt.Println("STRING DATA RECEIVED : ", string(buf))
 		err = writeChunkToFile(chunkNo, data, file)
+		// chunksWanted=removeElement(chunksWanted,strconv.Itoa(int(chunkNo)))
 		if err != nil {
 			fmt.Println("ALRIGHT BOYZ WE DONE ", err.Error())
 			break
@@ -379,22 +387,92 @@ func downloadFileFromClient(sender global.Client, file *os.File, chunksWanted []
 	}
 
 	_, newChunksWanted, err := verifier.VerifyFile(file, trackerFile)
-
+	fmt.Println("NEW CHUNKS WANTED", newChunksWanted)
+	if len(newChunksWanted) > 0 {
+		// file.Truncate(0)
+		// file.Seek(0, 0)
+		return newChunksWanted, nil
+	}
 	if err != nil {
 		fmt.Println("ERROR", err.Error())
 		return nil, err
 	}
-	if len(newChunksWanted) > 0 {
-		return newChunksWanted, nil
-	}
 	return []string{}, nil
+
+}
+func replaceChunk(originalFile *os.File, chunkOffset, chunkSize int64, newChunk []byte) error {
+
+	originalFile.Seek(0,0)
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "tempfile")
+	if err != nil {
+		fmt.Println("ABE SYSEIE 1")
+		return err
+	}
+	defer tempFile.Close()
+
+	// Copy the part before the chunk
+	before, err := io.CopyN(tempFile, originalFile, chunkOffset);
+	if  err != nil {
+		fmt.Println("ABE SYSEIE 2")
+
+		return err
+	}
+
+	fmt.Println("befo",before)
+
+	// Write the new chunk to the temporary file
+	chunkbyte, err := tempFile.Write(newChunk);
+	if  err != nil {
+		fmt.Println("ABE SYSEIE 3")
+
+		return err
+	}
+	fmt.Println(chunkbyte,"chunkBytes")
+
+	// Skip the chunk in the original file
+	seek, err := originalFile.Seek(chunkOffset+chunkSize, io.SeekStart);
+	if  err != nil {
+		fmt.Println("ABE SYSEIE 4")
+
+		return err
+	}
+	fmt.Println("SEEKED ",seek)
+
+	// Copy the rest of the original file to the temporary file
+	after, err := io.Copy(tempFile, originalFile)
+	if  err != nil {
+		fmt.Println("ABE SYSEIE 5")
+
+		return err
+	}
+	fmt.Println("after ",after)
+
+	// Close the files to ensure data integrity
+
+	// Replace the original file with the temporary file
+	originalFile.Truncate(0)
+	originalFile.Seek(0,io.SeekStart)
+	tempFile.Seek(0,io.SeekStart)
+	if _, err := io.Copy(originalFile, tempFile); err != nil {
+		fmt.Println("ABE SYSEIE 8")
+
+		return err
+	}
+
+	return nil
+
 
 }
 
 func writeChunkToFile(chunkno uint64, chunk []byte, file *os.File) error {
-
-	file.Seek(int64(chunkno)*int64(global.CHUNK_SIZE), 0)
-	file.Write(chunk)
+	offset:=int64(chunkno)*int64(global.CHUNK_SIZE)
+	fmt.Println("OVRRIDING OFFSET",offset)
+	err:=replaceChunk(file,offset,int64(global.CHUNK_SIZE),chunk)
+	if err!= nil {
+		fmt.Println("ERROR REPLACING",err.Error())
+		return err
+	}
 
 	return nil
 
@@ -426,13 +504,17 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 	if flag == 1 {
 
 		// receiver is gonna send which chunks they want
+		var len uint16
+		binary.Read(conn, binary.BigEndian, &len)
 
-		bytes, err := reader.ReadBytes('\x04')
+		bytes := make([]byte, len)
+
+		io.ReadFull(reader, bytes)
 		if err != nil {
 			fmt.Println("errorrorr reding chunss")
 		}
 		chunks := strings.Split(string(bytes), "::")
-
+		fmt.Println("CHUNKS STRING ", chunks)
 		for _, chunkNo := range chunks {
 			chunkNumber, err := strconv.Atoi(chunkNo)
 			if err != nil {
@@ -443,12 +525,12 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 			buf := make([]byte, global.CHUNK_SIZE+8)
 			binary.BigEndian.PutUint64(buf, uint64(chunkNumber))
-			_, err = filetoSend.ReadAt(buf[8:], int64(chunkNumber)*int64(global.CHUNK_SIZE))
+			bytesRead, readErr := filetoSend.ReadAt(buf[8:], int64(chunkNumber)*int64(global.CHUNK_SIZE))
 
-			if err != nil {
+			if readErr != nil {
 
-				// fmt.Println("ERROR OCCURED WHILE READING BYTES", err.Error())
-				if err == io.EOF {
+				// fmt.Println("ERROR OCCURED WHILE READING BYTES", readErr.Error())
+				if readErr == io.EOF {
 
 				} else {
 					fmt.Println("WE FUCKING RETURNING BOYS")
@@ -456,20 +538,28 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 				}
 			}
 
+			message := buf
+			binary.Write(conn, binary.BigEndian, uint32(bytesRead))
+			hasher := sha512.New()
+			hasher.Write(message[8 : 8+bytesRead])
+
+			fmt.Println("sending chunk", chunkNo, "Sending no of bytes", bytesRead, "HASH", hex.EncodeToString(hasher.Sum(nil)))
+			// fmt.Println("ChunkNo", chunkNo, "Sending no of bytes", uint32(bytesRead))
+			_, err = conn.Write(message)
 			if err != nil {
-				fmt.Println("ERROR SENDING FILR DIA:", err.Error())
-				return
+				fmt.Println("WRITING error", err.Error())
+				break
 			}
-
-			message := make([]byte, global.CHUNK_SIZE)
-
-			copy(message, buf)
-
-			// fmt.Println("ChunkNo", chunkNo, "Sending no of bytes", len(message))
-			conn.Write(message)
-
 			ackBuf := make([]byte, 1)
 			reader.Read(ackBuf)
+
+			if readErr == io.EOF {
+				//eof
+				conn.Close()
+				fmt.Println("BAN EM")
+				break
+
+			}
 
 		}
 
@@ -518,6 +608,6 @@ func SendFile(reader *bufio.Reader, conn net.Conn, sender global.Client) {
 
 	}
 
-	conn.Close()
+	defer conn.Close()
 
 }

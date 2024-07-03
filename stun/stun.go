@@ -32,7 +32,7 @@ func GetAddressFromStun() (string, error) {
 			return
 		}
 
-		address = xorAddr.IP.String()
+		address = xorAddr.IP.To16().String()
 	})
 
 	if err != nil {
