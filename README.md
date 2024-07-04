@@ -2,12 +2,12 @@
 Welcome to the InterFiles project! This project implements a peer-to-peer file sharing system with a master server for coordination and client nodes that communicate directly with each other. The system is built using Go and raw TCP for communication.
 
 ## Table of Contents\
-[Introduction](#introduction)  
-[Features](#features)  
-[Architecture](#architecture)  
-[Installation](#installation)  
-[Usage](#usage)  
-[Contact](#contact)  
+- [Introduction](#introduction)  
+- [Features](#features)  
+- [Architecture](#architecture)  
+- [Installation](#installation)  
+- [Usage](#usage)  
+- [Contact](#contact)  
 ## Introduction
 This project aims to provide a distributed file system similar to BitTorrent. It features a master server that handles peer discovery and coordination, while client nodes communicate in a peer-to-peer manner to share files.
 
