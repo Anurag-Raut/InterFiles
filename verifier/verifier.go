@@ -24,9 +24,9 @@ func HashChunk(hasher hash.Hash, content []byte) string {
 	return hashString
 }
 
-func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
+func VerifyFile(file, trackerFile *os.File) (bool, []string, error) {
 	file.Seek(0, 0)
-	trackerFile.Seek(0,0)
+	trackerFile.Seek(0, 0)
 	hasher := sha512.New()
 	chunkNo := 0
 	trackerScanner := bufio.NewScanner(trackerFile)
@@ -34,10 +34,10 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 	for i := 0; i < 2; i++ {
 		if !trackerScanner.Scan() {
 			if trackerScanner.Err() != nil {
-				return false ,nil, trackerScanner.Err()
+				return false, nil, trackerScanner.Err()
 			}
-			return false,nil, fmt.Errorf("file has fewer than %d lines", i)
-		}else {
+			return false, nil, fmt.Errorf("file has fewer than %d lines", i)
+		} else {
 			trackerScanner.Text()
 		}
 	}
@@ -45,16 +45,15 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 	for {
 		buf := make([]byte, global.CHUNK_SIZE)
 		bytesReaded, bufError := file.Read(buf)
-		if bufError != nil  && bufError!= io.EOF{
+		if bufError != nil && bufError != io.EOF {
 			fmt.Println("ERROR", bufError.Error())
-			return false,chunksWanted, bufError
+			return false, chunksWanted, bufError
 		}
 
-
 		if !trackerScanner.Scan() {
-			fmt.Println("EasdRROR 2",chunksWanted)
+			fmt.Println("EasdRROR 2", chunksWanted)
 			file.Truncate(0)
-			return false,nil, fmt.Errorf("error ")
+			return false, nil, fmt.Errorf("error ")
 
 		}
 
@@ -69,7 +68,7 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		if err != nil {
 			fmt.Println("ERROR asdasd2")
 
-			return false,chunksWanted, err
+			return false, chunksWanted, err
 
 		}
 		hasher.Reset()
@@ -79,35 +78,33 @@ func VerifyFile(file, trackerFile *os.File) (bool,[]string, error) {
 		if err != nil {
 			fmt.Println("ERROR 2as")
 
-			return false,chunksWanted, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
+			return false, chunksWanted, fmt.Errorf("error converting tracker chunk number to integer: %v", err)
 		}
 
 		if trackerChunknoInt != chunkNo {
 			fmt.Println("ERROR 2")
-			return false,chunksWanted, fmt.Errorf("order mismatch trackerChunkNo : %d , actual chunk : %d",trackerChunknoInt,chunkNo)
+			return false, chunksWanted, fmt.Errorf("order mismatch trackerChunkNo : %d , actual chunk : %d", trackerChunknoInt, chunkNo)
 
 		}
 		chunkNo++
 
-
 		if !bytes.Equal(hash, hashBytes) {
-			fmt.Println("NOT MATCHING",trackerChunkno,"from tracker ",hashHex,"from file ",hex.EncodeToString(hash))
-			chunksWanted=append(chunksWanted, trackerChunkno)
-			fmt.Println("CHUNKS WANTED 1",chunksWanted)
+			fmt.Println("NOT MATCHING", trackerChunkno, "from tracker ", hashHex, "from file ", hex.EncodeToString(hash))
+			chunksWanted = append(chunksWanted, trackerChunkno)
+			// fmt.Println("CHUNKS WANTED 1",chunksWanted)
 			continue
 		}
 		hasher.Reset()
 
-		if bytesReaded < int(global.CHUNK_SIZE)  || bufError==io.EOF{
+		if bytesReaded < int(global.CHUNK_SIZE) || bufError == io.EOF {
 
 			break
 		}
 
-
 	}
-	fmt.Println("CHUNKS WANTED 2",chunksWanted)
+	// fmt.Println("CHUNKS WANTED 2",chunksWanted)
 
-	return true,chunksWanted, nil
+	return true, chunksWanted, nil
 
 }
 

@@ -168,8 +168,17 @@ func (client *Client) handleConnection(conn net.Conn) {
 }
 
 func (client *Client) senderHandShake(reader *bufio.Reader, conn net.Conn) {
-
-	binary.Write(conn, binary.BigEndian, uint8(1))
+	var fileIdlen uint16
+	exists:=uint8(1)
+	binary.Read(reader,binary.BigEndian,&fileIdlen)
+	fileIdBuf:= make([]byte,fileIdlen)
+	reader.Read(fileIdBuf)
+	fileId:=string(fileIdBuf)
+	_,err := os.Open(client.Directory+fileId)
+	if err != nil {
+		exists=uint8(0)
+	}
+	binary.Write(conn, binary.BigEndian, exists)
 
 }
 func (client *Client) receiverHandShake(reader *bufio.Reader, conn net.Conn) {
