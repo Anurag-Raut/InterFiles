@@ -98,7 +98,7 @@ func (client *Client) Start() error {
 
 	go client.startReqFileLoop()
 	go client.startAcceptingConn()
-	global.SuccessPrint.Printf("Server is listening on %s:%s\n", client.IP, client.Port)
+	global.SuccessPrint.Printf("Client server is listening on %s:%s\n", client.IP, client.Port)
 	return nil
 }
 
@@ -436,12 +436,17 @@ func (client *Client) GetStats(trackerFilePath string) {
 	}
 	fileId := scanner.Text()
 
+	metadata,err:=tracker.GetMetadata(trackerFile)
+	if err != nil {
+		global.ErrorPrint.Println("Error while retreiving metadata from tracker file")
+		return
+	}
+
 	conn, err := net.Dial("tcp", global.MASTER_SERVER_URL)
 	if err != nil {
 		fmt.Println("Error while reading ", err)
 		return
 	}
-	fmt.Println("FILE ID ON SENDER", fileId)
 	binary.Write(conn, binary.BigEndian, global.GET_STATS)
 	conn.Write([]byte(fileId))
 	conn.(*net.TCPConn).CloseWrite()
@@ -452,6 +457,10 @@ func (client *Client) GetStats(trackerFilePath string) {
 
 	if exists {
 		binary.Read(conn, binary.BigEndian, &noOfClients)
+		global.SuccessPrint.Println("FILE : ", fileId)
+		global.SuccessPrint.Println("DATE OF UPLOAD : ", metadata.Date)
+		global.SuccessPrint.Println("SIZE : ", metadata.Size ," bytes")
+		global.SuccessPrint.Println("TOTAL CHUNKS : ", metadata.TotalChunks)
 		global.SuccessPrint.Println("NO OF CLIENTS THAT HAS THIS FILE : ", noOfClients)
 
 	} else {

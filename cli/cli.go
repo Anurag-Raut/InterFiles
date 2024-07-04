@@ -63,6 +63,9 @@ func StartCli() {
 		case "help":
 			fmt.Println("Available commands:")
 			fmt.Println("  hello - Get a greeting")
+			fmt.Println("client  - start client server")
+			fmt.Println("master  - start master server")
+
 			fmt.Println("  help  - Show this help message")
 			fmt.Println("  exit  - Exit the program")
 		default:
@@ -121,6 +124,14 @@ func StartClientCli(c client.ClientService) {
 				c.GetStats(filepath)
 
 			}
+		case "help":
+			fmt.Println("Available commands:")
+			fmt.Println("upload -p path/to/file -  Upload a file")
+			fmt.Println("download -p path/to/tracker-file -  Downlaod a file")
+			fmt.Println("download -p path/to/tracker-file  - Get stats of file")
+
+			fmt.Println("  help  - Show this help message")
+			fmt.Println("  exit  - Exit the program")
 
 		}
 
